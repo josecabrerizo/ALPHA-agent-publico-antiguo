@@ -56,6 +56,27 @@ sala en calma ronda -60, hablar cerca del micro entre -30 y -20, y el silencio
 digital da -Infinity. En porcentaje todo esto se ve como "0,0%" y no distingue
 un micro mudo de uno que simplemente no tiene a nadie delante.
 
+### Qué micrófono usa
+
+El **predeterminado del sistema**, el que tengas configurado en Windows. No es
+gratis averiguarlo: DirectShow —de donde tira ffmpeg— no tiene el concepto de
+"predeterminado" y entrega los dispositivos en orden arbitrario, así que se le
+pregunta a Core Audio (`IMMDeviceEnumerator`) y se empareja por GUID de
+endpoint, no por nombre. En Linux no hace falta: `default` de PulseAudio ya lo
+resuelve.
+
+Para forzar otro, `ALPHA_AUDIO_DEVICE` con el nombre exacto que dé
+`npm run devices`.
+
+Dos cosas que confunden y conviene saber:
+
+- Un dispositivo **desenchufado no aparece** en la lista. Si esperabas ver un
+  casco y no está, no está puesto.
+- Un adaptador USB de audio **sin micrófono conectado sí aparece**, y captura
+  con normalidad: entrega silencio (~-90 dBFS) en vez de dar error. Si es tu
+  predeterminado, el asistente será sordo sin decir por qué. `mic-check` es
+  justo para eso.
+
 `setup:stt` acepta `--model base|small|medium`. Por defecto `small`: `base` es
 notablemente flojo en español.
 
