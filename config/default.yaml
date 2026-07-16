@@ -1,0 +1,42 @@
+# Configuracion por defecto de A.L.P.H.A.
+# Para ajustes locales sin tocar git: copiar a config/local.yaml (ignorado).
+
+# Modo confidencial: desactiva TODA salida a la nube durante la sesion.
+# La "H" de Hibrido es opcional por diseno; esto es el interruptor.
+confidencial: false
+
+audio:
+  # Nombre exacto del dispositivo. Vacio = el primero del sistema.
+  # Listar con: npm run devices
+  dispositivo: ''
+  vad:
+    hangoverMs: 700       # silencio que cierra un tramo hablado
+    minUtteranceMs: 300   # por debajo, es un chasquido y se descarta
+    preRollMs: 300        # audio previo conservado, para no comerse la primera silaba
+    thresholdFactor: 3.0  # cuanto debe superar el ruido de fondo para contar como voz
+
+stt:
+  motor: whisper.cpp
+  modelo: small           # base | small | medium — small es el minimo decente en espanol
+  idioma: es              # 'auto' para detectar
+
+# Cerebro. El proveedor local es el que manda; la nube es acelerador opcional.
+llm:
+  proveedor: ollama
+  modelo: gemma4:12b      # unico modelo presente en el Ollama de la maquina
+  url: http://127.0.0.1:11434
+  nube:
+    # Solo se consultan si confidencial=false. Claves por variable de entorno.
+    proveedor: anthropic
+    modelo: claude-sonnet-5
+
+tts:
+  motor: msedge-tts       # requiere red; en modo confidencial se cae a piper
+  voz: es-ES-AlvaroNeural
+  local:
+    motor: piper
+    voz: es_ES-sharvard-medium
+
+# Cuatro agentes seleccionables; el avatar es un recurso, no codigo.
+# Ver packages/ui-avatar cuando exista.
+agente: vulpis            # vulpis | unit-a | nexus | synapse

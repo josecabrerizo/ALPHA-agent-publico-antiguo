@@ -1,0 +1,20 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Binarios y modelos descargados por tools/fetch-whisper.mjs (cientos de MB)
+vendor/
+models/
+
+# Grabaciones y capturas temporales del motor
+.tmp/
+*.wav
+*.png
+
+# Secretos: claves de proveedores de nube
+.env
+.env.*
+config/local.yaml
+
+.DS_Store
+Thumbs.db
