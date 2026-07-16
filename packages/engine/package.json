@@ -10,6 +10,8 @@
     "build": "tsc --build",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "spike:stt": "tsx src/spikes/stt.ts",
-    "devices": "tsx src/spikes/devices.ts"
+    "spike:stt-file": "tsx src/spikes/stt-file.ts",
+    "devices": "tsx src/spikes/devices.ts",
+    "mic-check": "tsx src/spikes/mic-check.ts"
   }
 }

@@ -49,3 +49,24 @@ export function frameRms(frame: Buffer): number {
   }
   return Math.sqrt(sum / samples);
 }
+
+/** Muestra de mayor amplitud (0..1) de una trama s16le. */
+export function framePeak(frame: Buffer): number {
+  const samples = Math.floor(frame.length / BYTES_PER_SAMPLE);
+  let peak = 0;
+  for (let i = 0; i < samples; i++) {
+    peak = Math.max(peak, Math.abs(frame.readInt16LE(i * BYTES_PER_SAMPLE) / 32768));
+  }
+  return peak;
+}
+
+/**
+ * Convierte una amplitud 0..1 a dBFS.
+ *
+ * Los niveles de audio se leen en dB, no en porcentaje: el ruido de una sala
+ * en calma ronda -60 dBFS, que como porcentaje es "0,1%" y se confunde con
+ * silencio absoluto. La escala logaritmica es la que distingue ambas cosas.
+ */
+export function toDbfs(amplitude: number): number {
+  return amplitude <= 0 ? -Infinity : 20 * Math.log10(amplitude);
+}

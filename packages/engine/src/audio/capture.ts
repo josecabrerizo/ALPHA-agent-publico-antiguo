@@ -19,6 +19,11 @@ export interface CaptureHandle {
  * Se usa ffmpeg en vez de bindings nativos (naudiodon y compania) a proposito:
  * evita compilar modulos por plataforma y por version de Node, y ya es una
  * dependencia del proyecto para grabacion de pantalla.
+ *
+ * OJO: abrir el dispositivo tarda ~1,8 s (medido en Windows/dshow) antes del
+ * primer byte. Si el avatar se pone a "escuchando" al pulsar, se comera el
+ * principio de la frase. Hay que esperar al primer chunk para dar la senal de
+ * grabacion, o mantener ffmpeg caliente entre sesiones.
  */
 export function captureMicrophone(options: CaptureOptions = {}): CaptureHandle {
   const input = buildInputArgs(options.device);

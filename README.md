@@ -39,6 +39,23 @@ npm run devices        # ver micrófonos disponibles
 npm run spike:stt      # hablar y ver la transcripción
 ```
 
+### Diagnóstico
+
+Cuando el asistente "no oye", estos guiones separan el problema por capas en vez
+de adivinar:
+
+```bash
+npm run mic-check              # ¿capta el micro? Ritmo y nivel en dBFS
+npm run mic-check -- 10        # ...durante 10s
+npm run spike:stt-file -- x.wav  # ¿transcribe? Sin micro de por medio
+npm test                       # ¿segmenta el VAD? Con audio sintético
+```
+
+`mic-check` mide en **dBFS**, que es como se leen los niveles de audio: una
+sala en calma ronda -60, hablar cerca del micro entre -30 y -20, y el silencio
+digital da -Infinity. En porcentaje todo esto se ve como "0,0%" y no distingue
+un micro mudo de uno que simplemente no tiene a nadie delante.
+
 `setup:stt` acepta `--model base|small|medium`. Por defecto `small`: `base` es
 notablemente flojo en español.
 
