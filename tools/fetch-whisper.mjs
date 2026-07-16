@@ -8,8 +8,9 @@
  */
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { createWriteStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import { access, cp, mkdir, mkdtemp, readdir, rm, stat } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +20,22 @@ import { pipeline } from 'node:stream/promises';
 const execFileAsync = promisify(execFile);
 
 const WHISPER_VERSION = 'v1.9.1';
+
+/**
+ * SHA1 oficiales, publicados por el proyecto whisper.cpp en
+ * models/README.md. Son lo que hace irrelevante de que host venga el fichero:
+ * si el hash cuadra, los bytes son los oficiales.
+ */
+const MODEL_SHA1 = {
+  tiny: 'bd577a113a864445d4c299885e0cb97d4ba92b5f',
+  base: '465707469ff3a37a2b9b8d8f89f2f99de7299dac',
+  small: '55356645c2b361a969dfd0ef2c5a50d530afd8d5',
+  medium: 'fd9727b6e1217c2f614f9b698455c4ffd82463b4',
+  'large-v3': 'ad82bf6a9043ceed055076d0fd39f5f186ff8062',
+};
+
+/** Host de los modelos. Ver README: huggingface.co puede estar filtrado. */
+const HF_HOST = process.env.ALPHA_HF_HOST ?? 'https://huggingface.co';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const vendorDir = path.join(repoRoot, 'vendor', 'whisper');
 const modelsDir = path.join(repoRoot, 'models');
@@ -51,6 +68,12 @@ async function exists(target) {
   } catch {
     return false;
   }
+}
+
+async function sha1(file) {
+  const hash = createHash('sha1');
+  await pipeline(createReadStream(file), hash);
+  return hash.digest('hex');
 }
 
 /**
@@ -158,20 +181,52 @@ async function setupBinary() {
 }
 
 async function setupModel() {
+  const expected = MODEL_SHA1[modelSize];
+  if (!expected) {
+    throw new Error(`Modelo desconocido: ${modelSize}. Opciones: ${Object.keys(MODEL_SHA1).join(', ')}`);
+  }
+
   const dest = path.join(modelsDir, `ggml-${modelSize}.bin`);
   if (!force && (await exists(dest))) {
+    // Se verifica aunque no lo hayamos bajado nosotros: el caso normal aqui es
+    // un modelo colocado a mano, y una descarga truncada se ve igual que una buena.
     const { size } = await stat(dest);
-    console.log(`✓ Modelo ya presente (${(size / 1024 / 1024).toFixed(0)} MB)`);
+    process.stdout.write(`Modelo ya presente (${(size / 1024 / 1024).toFixed(0)} MB). Verificando... `);
+    const actual = await sha1(dest);
+    if (actual !== expected) {
+      console.log('MAL');
+      throw new Error(
+        `El SHA1 de ${path.relative(repoRoot, dest)} no es el oficial.\n` +
+          `  esperado: ${expected}\n  obtenido: ${actual}\n` +
+          'Descarga incompleta o fichero equivocado. Borralo y vuelve a bajarlo.',
+      );
+    }
+    console.log('OK');
     return;
   }
 
-  const url = `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-${modelSize}.bin?download=true`;
-  console.log(`\nDescargando modelo ggml-${modelSize}...`);
+  const url = `${HF_HOST}/ggerganov/whisper.cpp/resolve/main/ggml-${modelSize}.bin?download=true`;
+  console.log(`\nDescargando modelo ggml-${modelSize} de ${new URL(HF_HOST).host}...`);
   await mkdir(modelsDir, { recursive: true });
 
+  // Se descarga a .partial y solo se asciende a definitivo tras validar el
+  // hash: asi un fichero corrupto o una pagina de error del proxy nunca queda
+  // en models/ haciendose pasar por el modelo.
   const partial = `${dest}.partial`;
   try {
     await downloadWithRetry(url, partial);
+
+    process.stdout.write('  Verificando integridad... ');
+    const actual = await sha1(partial);
+    if (actual !== expected) {
+      throw new Error(
+        `SHA1 no coincide con el oficial de whisper.cpp.\n` +
+          `  esperado: ${expected}\n  obtenido: ${actual}\n` +
+          `El fichero no es el modelo oficial: se descarta.`,
+      );
+    }
+    console.log('OK');
+
     await cp(partial, dest);
     console.log(`✓ Modelo en ${path.relative(repoRoot, dest)}`);
   } finally {

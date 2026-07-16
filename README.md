@@ -42,6 +42,35 @@ npm run spike:stt      # hablar y ver la transcripción
 `setup:stt` acepta `--model base|small|medium`. Por defecto `small`: `base` es
 notablemente flojo en español.
 
+### Si `setup:stt` no puede bajar el modelo
+
+Los modelos viven en **huggingface.co**, que en la red de la oficina está
+filtrado por dominio (el TLS se establece, la petición sale y no vuelve nada;
+GitHub y el resto de CloudFront sí funcionan, así que el binario se descarga
+bien). Dos salidas:
+
+**Colocarlo a mano** — descarga desde otra red y déjalo en `models/` con el
+nombre exacto `ggml-<tamaño>.bin`:
+
+```
+https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
+  →  models/ggml-small.bin
+```
+
+Luego `npm run setup:stt` verifica su SHA1 contra el oficial y avisa si la
+descarga vino truncada.
+
+**Usar otro host** — cualquier réplica, vía `ALPHA_HF_HOST`:
+
+```bash
+ALPHA_HF_HOST=https://hf-mirror.com npm run setup:stt
+```
+
+En ambos casos el script valida el **SHA1 publicado por whisper.cpp** en su
+repo de GitHub antes de dar el modelo por bueno, y descarta el fichero si no
+cuadra. Por eso el origen es indiferente: o los bytes son los oficiales, o no
+se instalan.
+
 Si el micrófono por defecto no es el que quieres:
 
 ```bash
