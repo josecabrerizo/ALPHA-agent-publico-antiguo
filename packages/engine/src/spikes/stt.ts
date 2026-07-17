@@ -5,18 +5,20 @@
  * STT— sin UI, sin LLM y sin un solo modulo nativo.
  */
 import { captureMicrophone } from '../audio/capture.js';
-import { defaultInputDevice } from '../audio/devices.js';
+import { captureOptionsFromEnv } from '../audio/options.js';
 import { detectUtterances, type Utterance } from '../audio/vad.js';
 import { WhisperTranscriber } from '../stt/whisper.js';
 
-const device = process.env['ALPHA_AUDIO_DEVICE'] ?? (await defaultInputDevice()).name;
+const capture_opts = await captureOptionsFromEnv();
 const transcriber = new WhisperTranscriber({ language: process.env['ALPHA_LANG'] ?? 'es' });
 
 console.log(`\n  A.L.P.H.A. — spike audio→texto`);
-console.log(`  Microfono: ${device}`);
+console.log(`  Microfono: ${capture_opts.device}`);
+if (capture_opts.gainDb) console.log(`  Ganancia:  +${capture_opts.gainDb} dB`);
+if (capture_opts.normalize) console.log(`  Normalizacion dinamica: activada`);
 console.log(`  Habla normalmente. Ctrl+C para salir.\n`);
 
-const capture = captureMicrophone({ device });
+const capture = captureMicrophone(capture_opts);
 
 // Sin esto, ffmpeg se bloquea en cuanto una transcripcion tarda mas que el
 // buffer por defecto del pipe (64 KB = 2 s de audio) y se pierde habla.

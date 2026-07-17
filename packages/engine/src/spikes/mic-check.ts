@@ -4,17 +4,19 @@
  * conversacional "no oye": separa un problema de captura de uno de VAD o STT.
  */
 import { captureMicrophone } from '../audio/capture.js';
-import { defaultInputDevice } from '../audio/devices.js';
+import { captureOptionsFromEnv } from '../audio/options.js';
 import { BYTES_PER_SAMPLE, SAMPLE_RATE, framePeak, frameRms, toDbfs } from '../audio/format.js';
 
 const SECONDS = Number(process.argv[2] ?? 3);
-const device = process.env['ALPHA_AUDIO_DEVICE'] ?? (await defaultInputDevice()).name;
+const opts = await captureOptionsFromEnv();
 
-console.log(`\n  Microfono: ${device}`);
+console.log(`\n  Microfono: ${opts.device}`);
+if (opts.gainDb) console.log(`  Ganancia:  +${opts.gainDb} dB`);
+if (opts.normalize) console.log(`  Normalizacion dinamica: activada`);
 console.log(`  Capturando ${SECONDS}s...\n`);
 
 const spawned = performance.now();
-const capture = captureMicrophone({ device });
+const capture = captureMicrophone(opts);
 let firstByteAt = 0;
 let bytes = 0;
 let peak = 0;

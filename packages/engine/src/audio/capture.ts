@@ -5,6 +5,19 @@ import { SAMPLE_RATE, CHANNELS } from './format.js';
 export interface CaptureOptions {
   /** Nombre del dispositivo para ffmpeg. Por defecto, el primero del sistema. */
   device?: string;
+  /**
+   * Ganancia fija en dB. Util para subir un micro constante pero flojo. Con
+   * micros lejanos, cuyo nivel varia mucho segun la distancia, es mejor
+   * `normalize`: una ganancia fija o se queda corta o satura. 0 = sin tocar.
+   */
+  gainDb?: number;
+  /**
+   * Normalizacion dinamica (ffmpeg dynaudnorm): auto-nivela la senal en tiempo
+   * real, hable el usuario cerca o lejos, fuerte o flojo. Es lo que necesita un
+   * array integrado para entregar a whisper un nivel estable. Una senal
+   * inconsistente es la causa numero uno de que whisper "alucine" frases.
+   */
+  normalize?: boolean;
 }
 
 export interface CaptureHandle {
@@ -27,6 +40,17 @@ export interface CaptureHandle {
  */
 export function captureMicrophone(options: CaptureOptions = {}): CaptureHandle {
   const input = buildInputArgs(options.device);
+  // El filtrado se hace en ffmpeg, antes de cuantizar a s16le: sin escalones
+  // ni recorte. dynaudnorm va despues del volume por si se combinan.
+  const filters: string[] = [];
+  if (options.gainDb) filters.push(`volume=${options.gainDb}dB`);
+  // dynaudnorm con ventana corta (f=150ms) y algo de suavizado (g=15) para
+  // reaccionar rapido al empezar a hablar sin bombear en cada silaba. m=64 sube
+  // el tope de amplificacion (por defecto 10x/+20dB, corto para un array
+  // integrado que entrega la voz a -60 dBFS); p=0.9 deja headroom para no tocar
+  // techo y provocar el recorte que hace alucinar a whisper.
+  if (options.normalize) filters.push('dynaudnorm=f=150:g=15:m=64:p=0.9');
+  const filterArgs = filters.length > 0 ? ['-af', filters.join(',')] : [];
 
   // stdin va a 'ignore': ffmpeg no recibe nada, solo emite PCM por stdout.
   const ffmpeg: ChildProcessByStdio<null, Readable, Readable> = spawn(
@@ -36,6 +60,7 @@ export function captureMicrophone(options: CaptureOptions = {}): CaptureHandle {
       '-loglevel',
       'error',
       ...input,
+      ...filterArgs,
       '-ar',
       String(SAMPLE_RATE),
       '-ac',

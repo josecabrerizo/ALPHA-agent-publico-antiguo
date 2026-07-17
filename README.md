@@ -68,6 +68,27 @@ resuelve.
 Para forzar otro, `ALPHA_AUDIO_DEVICE` con el nombre exacto que dé
 `npm run devices`.
 
+### Micrófonos flojos: ganancia y normalización
+
+Un array integrado en la tapa del portátil entrega la voz 20-30 dB más floja
+que un micro de diadema, a menudo por debajo del umbral del VAD. Dos palancas,
+por variable de entorno:
+
+```bash
+ALPHA_MIC_GAIN=20      # ganancia fija en dB (micro constante pero flojo)
+ALPHA_MIC_NORMALIZE=1  # normalización dinámica (dynaudnorm)
+```
+
+Calibra siempre con `mic-check` antes: busca **pico entre -20 y -12 dBFS**
+hablando normal. Un pico cerca de 0 satura y hace que **whisper alucine frases**
+en vez de transcribir; demasiado bajo y devuelve vacío.
+
+Aviso: la normalización dinámica también amplifica el ruido en las pausas, así
+que no mejora la relación señal/ruido — solo sube el volumen. Con un micro malo
+o con AGC agresivo en el driver (típico de los "Smart Sound" de Intel), ni la
+ganancia ni la normalización dan un resultado fiable. Para STT de verdad, un
+micro decente (diadema USB, auriculares BT) marca toda la diferencia.
+
 Dos cosas que confunden y conviene saber:
 
 - Un dispositivo **desenchufado no aparece** en la lista. Si esperabas ver un
