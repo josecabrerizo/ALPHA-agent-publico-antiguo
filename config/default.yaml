@@ -20,15 +20,35 @@ stt:
   modelo: small           # base | small | medium — small es el minimo decente en espanol
   idioma: es              # 'auto' para detectar
 
-# Cerebro. El proveedor local es el que manda; la nube es acelerador opcional.
-llm:
-  proveedor: ollama
-  modelo: gemma4:12b      # unico modelo presente en el Ollama de la maquina
-  url: http://127.0.0.1:11434
-  nube:
-    # Solo se consultan si confidencial=false. Claves por variable de entorno.
-    proveedor: anthropic
-    modelo: claude-sonnet-5
+# Cerebro. Patron Hermes/OpenClaw: registro de proveedores compatibles con la
+# API de OpenAI + una referencia por defecto en formato proveedor/modelo.
+# UN solo cliente sirve para todos; solo cambian base_url, clave y modelo.
+# (De momento el codigo usa DEFAULT_BRAIN_CONFIG en brain/config.ts; este
+#  bloque documenta la forma para cuando exista el cargador de YAML.)
+cerebro:
+  modelo: ollama/gemma4:12b   # el unico modelo presente en la maquina
+  # Razonamiento: 'none' con modelos "thinking" (gemma4) para no perder
+  # segundos ni tokens razonando antes de responder. Clave para la voz.
+  razonamiento: none          # none | low | medium | high
+  proveedores:
+    ollama:
+      base_url: http://127.0.0.1:11434/v1
+      api_key: ollama         # Ollama la ignora, pero el cliente la exige
+      local: true             # disponible en modo confidencial
+      modelos: [gemma4:12b]
+    anthropic:
+      base_url: https://api.anthropic.com/v1
+      api_key_env: ANTHROPIC_API_KEY   # nunca el secreto en el fichero
+      local: false
+      modelos: [claude-sonnet-5, claude-opus-4-8]
+    openai:
+      base_url: https://api.openai.com/v1
+      api_key_env: OPENAI_API_KEY
+      local: false
+    gemini:
+      base_url: https://generativelanguage.googleapis.com/v1beta/openai
+      api_key_env: GEMINI_API_KEY
+      local: false
 
 tts:
   motor: msedge-tts       # requiere red; en modo confidencial se cae a piper

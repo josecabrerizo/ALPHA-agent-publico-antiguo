@@ -12,10 +12,12 @@
     "spike:stt": "tsx src/spikes/stt.ts",
     "spike:stt-file": "tsx src/spikes/stt-file.ts",
     "spike:system": "tsx src/spikes/system.ts",
+    "spike:brain": "tsx src/spikes/brain.ts",
     "devices": "tsx src/spikes/devices.ts",
     "mic-check": "tsx src/spikes/mic-check.ts"
   },
   "dependencies": {
-    "audify": "^1.10.1"
+    "audify": "^1.10.1",
+    "openai": "^6.48.0"
   }
 }
