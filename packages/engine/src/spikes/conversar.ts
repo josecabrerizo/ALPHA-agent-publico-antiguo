@@ -12,7 +12,18 @@ import { WhisperTranscriber } from '../stt/whisper.js';
 import { Brain } from '../brain/client.js';
 import { createSpeaker } from '../tts/speaker.js';
 import { captureOptionsFromEnv } from '../audio/options.js';
-import { ConversationSession } from '../conversation/session.js';
+import { toDbfs } from '../audio/format.js';
+import { ConversationSession, type ConversationState } from '../conversation/session.js';
+
+/** Marca de tiempo estilo Java: HH:MM:SS.mmm. */
+function stamp(): string {
+  const d = new Date();
+  const p = (n: number, w = 2) => String(n).padStart(w, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
+}
+function log(message: string): void {
+  console.log(`[${stamp()}] ${message}`);
+}
 
 const captureOptions = await captureOptionsFromEnv();
 const confidential = process.env['ALPHA_CONFIDENCIAL'] === '1';
@@ -36,7 +47,16 @@ console.log(`  Voz:       ${voiceInfo.engine}/${voiceInfo.voice} ${voiceInfo.loc
 if (confidential) console.log(`  Modo confidencial: ON (sin nube)`);
 console.log(`  Habla cuando quieras. Ctrl+C para salir.\n`);
 
-const ICON: Record<string, string> = { escuchando: '👂', pensando: '🧠', hablando: '🗣️' };
+const ICON: Record<ConversationState, string> = { escuchando: '👂', pensando: '🧠', hablando: '🗣️' };
+
+// Seguimiento del estado actual para el heartbeat: cuanto lleva asi.
+let state: ConversationState = 'escuchando';
+let stateSince = Date.now();
+
+// Nivel del microfono: se acumula el pico y se muestra una vez por segundo
+// mientras se escucha, para saber si el micro te esta oyendo.
+let peak = 0;
+let lastLevelLog = 0;
 
 const session = new ConversationSession({
   capture: captureOptions,
@@ -44,16 +64,41 @@ const session = new ConversationSession({
   brain,
   speaker,
   callbacks: {
-    onState: (s) => process.stdout.write(`\r  ${ICON[s]} ${s}...            `),
-    onUserText: (t) => console.log(`\r  tú    › ${t}                    `),
-    onAssistantText: (t) => console.log(`  ALPHA › ${t}\n`),
-    onError: (where, err) => console.error(`\r  ✗ [${where}] ${err.message}\n`),
+    onState: (s) => {
+      state = s;
+      stateSince = Date.now();
+      log(`${ICON[s]} ${s}`);
+    },
+    onLevel: (level, speaking) => {
+      peak = Math.max(peak, level);
+      const now = Date.now();
+      // Solo en escuchando y como mucho cada segundo, para no inundar.
+      if (state === 'escuchando' && now - lastLevelLog > 1000) {
+        const db = toDbfs(peak);
+        log(`   micro: pico ${db === -Infinity ? '−∞' : db.toFixed(0)} dBFS${speaking ? '  (voz)' : ''}`);
+        peak = 0;
+        lastLevelLog = now;
+      }
+    },
+    onLog: (m) => log(`   ${m}`),
+    onUserText: (t) => log(`tú    › ${t}`),
+    onAssistantText: (t) => log(`ALPHA › ${t}`),
+    onError: (where, err) => log(`✗ [${where}] ${err.message}`),
   },
 });
 
+// Heartbeat: si lleva mas de 3s sin cambiar de estado (y no esta escuchando),
+// avisa de cuanto lleva, para ver un cuelgue en vez de un silencio.
+const heartbeat = setInterval(() => {
+  if (state === 'escuchando') return;
+  const secs = ((Date.now() - stateSince) / 1000).toFixed(0);
+  log(`   ⏳ sigue en "${state}" desde hace ${secs}s`);
+}, 3000);
+
 process.on('SIGINT', () => {
+  clearInterval(heartbeat);
   session.stop();
-  console.log('\n\n  Hasta luego.\n');
+  console.log('\n  Hasta luego.\n');
   process.exit(0);
 });
 

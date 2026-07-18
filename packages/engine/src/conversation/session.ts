@@ -14,6 +14,8 @@ export interface ConversationCallbacks {
   onAssistantText?(text: string): void;
   onLevel?(level: number, speaking: boolean): void;
   onError?(where: string, error: Error): void;
+  /** Traza con tiempos de cada fase del turno, para depurar y medir latencias. */
+  onLog?(message: string): void;
 }
 
 export interface ConversationDeps {
@@ -66,6 +68,7 @@ export class ConversationSession {
       ...(this.cb.onLevel ? { onLevel: this.cb.onLevel } : {}),
     })) {
       if (!this.running) break;
+      this.cb.onLog?.(`voz recibida: ${(utterance.speechMs / 1000).toFixed(1)}s de habla`);
       await this.handleTurn(utterance.pcm);
       if (!this.running) break;
       this.cb.onState?.('escuchando');
@@ -73,8 +76,12 @@ export class ConversationSession {
   }
 
   private async handleTurn(pcm: Buffer): Promise<void> {
+    const t0 = performance.now();
+    const ms = (from: number) => Math.round(performance.now() - from);
+
     // 1) Pensar (transcribir).
     this.cb.onState?.('pensando');
+    this.cb.onLog?.('transcribiendo…');
     let text: string;
     try {
       text = await this.whisper.transcribe(pcm);
@@ -82,17 +89,28 @@ export class ConversationSession {
       this.cb.onError?.('stt', error as Error);
       return;
     }
-    if (!text) return; // ruido: nada que decir
+    if (!text) {
+      this.cb.onLog?.(`transcrito en ${ms(t0)}ms: sin habla reconocida (ruido)`);
+      return;
+    }
+    this.cb.onLog?.(`transcrito en ${ms(t0)}ms`);
     this.cb.onUserText?.(text);
     this.history.push({ role: 'user', content: text });
 
     // 2) Pensar (LLM) + 3) Hablar, en tuberia: las frases se dicen conforme
     //    el cerebro las termina.
+    this.cb.onLog?.('consultando al cerebro…');
+    const tBrain = performance.now();
     const queue = new SpeechQueue(this.speaker, () => this.cb.onState?.('hablando'));
     let full = '';
     let buffer = '';
+    let firstToken = false;
     try {
       for await (const chunk of this.brain.replyStream(this.history)) {
+        if (!firstToken) {
+          firstToken = true;
+          this.cb.onLog?.(`primer token del cerebro en ${ms(tBrain)}ms`);
+        }
         full += chunk;
         buffer += chunk;
         const { sentences, rest } = splitSentences(buffer);
@@ -100,6 +118,7 @@ export class ConversationSession {
         buffer = rest;
       }
       if (buffer.trim()) queue.enqueue(buffer);
+      this.cb.onLog?.(`respuesta generada en ${ms(tBrain)}ms; terminando de hablar…`);
       await queue.drain();
     } catch (error) {
       queue.stop();
@@ -111,6 +130,7 @@ export class ConversationSession {
       this.cb.onAssistantText?.(full);
       this.history.push({ role: 'assistant', content: full });
     }
+    this.cb.onLog?.(`turno completo en ${ms(t0)}ms`);
   }
 
   stop(): void {
