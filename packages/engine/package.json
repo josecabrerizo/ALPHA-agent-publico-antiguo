@@ -15,7 +15,8 @@
     "spike:brain": "tsx src/spikes/brain.ts",
     "devices": "tsx src/spikes/devices.ts",
     "mic-check": "tsx src/spikes/mic-check.ts",
-    "spike:tts": "tsx src/spikes/tts.ts"
+    "spike:tts": "tsx src/spikes/tts.ts",
+    "spike:conversar": "tsx src/spikes/conversar.ts"
   },
   "dependencies": {
     "audify": "^1.10.1",
