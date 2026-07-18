@@ -10,7 +10,10 @@ export { listInputDevices, defaultInputDevice, type AudioDevice } from './audio/
 export { detectUtterances, type Utterance, type VadOptions } from './audio/vad.js';
 export { WhisperTranscriber, type WhisperOptions } from './stt/whisper.js';
 export { SAMPLE_RATE, CHANNELS, pcmToWav } from './audio/format.js';
-export { Brain, type ChatMessage, type BrainOptions } from './brain/client.js';
+export { Brain, type ChatMessage, type BrainOptions, type AgentEvent } from './brain/client.js';
+export { ToolRegistry } from './brain/tools/registry.js';
+export { BUILTIN_TOOLS } from './brain/tools/builtin.js';
+export type { Tool, ToolContext } from './brain/tools/types.js';
 export { DEFAULT_BRAIN_CONFIG } from './brain/config.js';
 export { resolveModel } from './brain/registry.js';
 export type { BrainConfig, ProviderConfig, ResolvedModel } from './brain/types.js';

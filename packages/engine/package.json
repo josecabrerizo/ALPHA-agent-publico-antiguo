@@ -16,7 +16,8 @@
     "devices": "tsx src/spikes/devices.ts",
     "mic-check": "tsx src/spikes/mic-check.ts",
     "spike:tts": "tsx src/spikes/tts.ts",
-    "spike:conversar": "tsx src/spikes/conversar.ts"
+    "spike:conversar": "tsx src/spikes/conversar.ts",
+    "spike:agente": "tsx src/spikes/agente.ts"
   },
   "dependencies": {
     "audify": "^1.10.1",

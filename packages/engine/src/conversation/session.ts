@@ -97,8 +97,9 @@ export class ConversationSession {
     this.cb.onUserText?.(text);
     this.history.push({ role: 'user', content: text });
 
-    // 2) Pensar (LLM) + 3) Hablar, en tuberia: las frases se dicen conforme
-    //    el cerebro las termina.
+    // 2) Pensar (LLM, con herramientas) + 3) Hablar, en tuberia: las frases se
+    //    dicen conforme el cerebro las termina; si pide herramientas, se
+    //    ejecutan y sigue.
     this.cb.onLog?.('consultando al cerebro…');
     const tBrain = performance.now();
     const queue = new SpeechQueue(this.speaker, () => this.cb.onState?.('hablando'));
@@ -106,13 +107,23 @@ export class ConversationSession {
     let buffer = '';
     let firstToken = false;
     try {
-      for await (const chunk of this.brain.replyStream(this.history)) {
+      for await (const ev of this.brain.runAgentic(this.history)) {
+        if (ev.type === 'tool-start') {
+          this.cb.onState?.('pensando');
+          this.cb.onLog?.(`herramienta: ${ev.name}(${ev.args || ''})`);
+          continue;
+        }
+        if (ev.type === 'tool-end') {
+          this.cb.onLog?.(`  → ${ev.result}`);
+          continue;
+        }
+        // ev.type === 'text'
         if (!firstToken) {
           firstToken = true;
           this.cb.onLog?.(`primer token del cerebro en ${ms(tBrain)}ms`);
         }
-        full += chunk;
-        buffer += chunk;
+        full += ev.delta;
+        buffer += ev.delta;
         const { sentences, rest } = splitSentences(buffer);
         for (const sentence of sentences) queue.enqueue(sentence);
         buffer = rest;

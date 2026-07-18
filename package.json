@@ -24,7 +24,8 @@
     "typecheck": "tsc --build",
     "mic-check": "npm run mic-check --workspace @alpha/engine",
     "spike:tts": "npm run spike:tts --workspace @alpha/engine --",
-    "spike:conversar": "npm run spike:conversar --workspace @alpha/engine"
+    "spike:conversar": "npm run spike:conversar --workspace @alpha/engine",
+    "spike:agente": "npm run spike:agente --workspace @alpha/engine"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
