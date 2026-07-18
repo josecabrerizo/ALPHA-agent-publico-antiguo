@@ -81,8 +81,12 @@ let stateSince = Date.now();
 let peak = 0;
 let lastLevelLog = 0;
 
+// Copia, no el mismo objeto: si la sesion y el spike compartieran captureOptions,
+// mutar el device aqui haria que setAudioDevice lo viera "ya aplicado" y no
+// reiniciara la captura. currentMic lleva el aparte cual es el activo.
+let currentMic = captureOptions.device;
 const session = new ConversationSession({
-  capture: captureOptions,
+  capture: { ...captureOptions },
   whisper,
   brain,
   speaker,
@@ -122,7 +126,7 @@ const session = new ConversationSession({
 async function sendDevices(): Promise<void> {
   try {
     const inputs = (await listInputDevices()).map((d) => ({ name: d.name, isDefault: d.isDefault }));
-    bridge.broadcast({ type: 'devices', inputs, current: captureOptions.device });
+    bridge.broadcast({ type: 'devices', inputs, current: currentMic });
   } catch (err) {
     log(`✗ [devices] ${(err as Error).message}`);
   }
@@ -135,9 +139,10 @@ void sendDevices();
 bridge.onConfigMessage((msg) => {
   const s = msg.settings;
 
-  // Microfono: reinicia la captura con el nuevo dispositivo.
-  if (typeof s.audioDevice === 'string' && s.audioDevice && s.audioDevice !== captureOptions.device) {
-    captureOptions.device = s.audioDevice;
+  // Microfono: reinicia la captura con el nuevo dispositivo. Se deja que
+  // setAudioDevice sea quien actualiza el estado de la sesion.
+  if (typeof s.audioDevice === 'string' && s.audioDevice && s.audioDevice !== currentMic) {
+    currentMic = s.audioDevice;
     session.setAudioDevice(s.audioDevice);
     log(`⚙️  microfono desde el avatar: ${s.audioDevice}`);
   }

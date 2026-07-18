@@ -1,4 +1,5 @@
 import { captureMicrophone, type CaptureHandle, type CaptureOptions } from '../audio/capture.js';
+import { defaultInputDevice } from '../audio/devices.js';
 import { detectUtterances } from '../audio/vad.js';
 import { WhisperTranscriber } from '../stt/whisper.js';
 import { Brain, type ChatMessage } from '../brain/client.js';
@@ -89,10 +90,15 @@ export class ConversationSession {
 
   async run(): Promise<void> {
     this.running = true;
-    // Bucle externo: cada vuelta abre la captura y escucha hasta que el stream
-    // termina. Un cambio de microfono corta la captura y provoca otra vuelta.
-    do {
+    // Bucle externo: mientras la sesion este activa, se mantiene la captura. Si
+    // el stream termina por lo que sea (cambio de micro, o ffmpeg que muere solo
+    // —p. ej. Mezcla estereo sin nada sonando—) se reabre. Solo se sale con
+    // stop(). Antes se salia al terminar el stream sin un cambio pedido, y eso
+    // mataba la sesion cuando un dispositivo se cerraba por su cuenta.
+    let fastFailures = 0;
+    while (this.running) {
       this.restartRequested = false;
+      const openedAt = performance.now();
       const capture = captureMicrophone(this.captureOptions);
       // Sin esto ffmpeg se bloquea cuando un turno tarda mas que el buffer del pipe.
       capture.pcm.setMaxListeners(0);
@@ -115,7 +121,32 @@ export class ConversationSession {
         if (!this.restartRequested) this.cb.onError?.('captura', error as Error);
       }
       capture.stop();
-    } while (this.running && this.restartRequested);
+      if (!this.running) break;
+
+      // Muerte rapida sin cambio pedido = dispositivo problematico (p. ej. el
+      // micro desenchufado). Tras un par de fallos, repliega al predeterminado
+      // del sistema para no quedarse reintentando un micro que ya no existe.
+      if (!this.restartRequested && performance.now() - openedAt < 1000) {
+        fastFailures++;
+        if (fastFailures >= 2 && this.captureOptions.device) {
+          try {
+            const fallback = await defaultInputDevice();
+            if (fallback.name !== this.captureOptions.device) {
+              this.cb.onLog?.(
+                `el microfono no responde; volviendo al predeterminado: ${fallback.name}`,
+              );
+              this.captureOptions = { ...this.captureOptions, device: fallback.name };
+              fastFailures = 0;
+            }
+          } catch {
+            // No hay ningun micro disponible; se seguira reintentando.
+          }
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+      } else {
+        fastFailures = 0;
+      }
+    }
   }
 
   private async handleTurn(pcm: Buffer): Promise<void> {
