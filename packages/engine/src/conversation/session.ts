@@ -71,14 +71,20 @@ export class ConversationSession {
   }
 
   /**
-   * Cambia el microfono en caliente. Cortar la captura actual hace que el
-   * bucle de escucha termine y se reinicie con el nuevo dispositivo.
+   * Cambia el microfono en caliente. Ademas de matar ffmpeg, destruye el
+   * stream a mano: en Windows matar el proceso no siempre cierra el pipe, y sin
+   * esto el bucle de escucha se quedaria esperando un stream que ya no llega
+   * (era lo que colgaba la captura al cambiar de micro varias veces seguidas).
    */
   setAudioDevice(device: string): void {
     if (device === this.captureOptions.device) return;
     this.captureOptions = { ...this.captureOptions, device };
     this.restartRequested = true;
-    this.handle?.stop();
+    this.cb.onLog?.(`cambiando de microfono a: ${device}`);
+    const handle = this.handle;
+    this.handle = undefined;
+    handle?.stop();
+    handle?.pcm.destroy(); // fuerza el fin del for-await ya mismo
   }
 
   async run(): Promise<void> {
@@ -104,10 +110,11 @@ export class ConversationSession {
           this.cb.onState?.('escuchando');
         }
       } catch (error) {
-        this.cb.onError?.('captura', error as Error);
+        // Al cambiar de micro destruimos el stream a proposito; ese cierre no
+        // es un error que reportar, es la senal de reinicio.
+        if (!this.restartRequested) this.cb.onError?.('captura', error as Error);
       }
       capture.stop();
-      if (this.restartRequested) this.cb.onLog?.(`cambiando de microfono a: ${this.captureOptions.device}`);
     } while (this.running && this.restartRequested);
   }
 
