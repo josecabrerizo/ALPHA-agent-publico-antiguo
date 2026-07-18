@@ -11,7 +11,11 @@
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "spike:stt": "tsx src/spikes/stt.ts",
     "spike:stt-file": "tsx src/spikes/stt-file.ts",
+    "spike:system": "tsx src/spikes/system.ts",
     "devices": "tsx src/spikes/devices.ts",
     "mic-check": "tsx src/spikes/mic-check.ts"
+  },
+  "dependencies": {
+    "audify": "^1.10.1"
   }
 }

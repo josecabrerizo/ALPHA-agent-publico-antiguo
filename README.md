@@ -17,6 +17,7 @@ la cadena **audio→texto**. Lo demás (cerebro, voz, visión, avatar) viene det
 | Capa | Estado |
 |---|---|
 | Captura de micrófono (ffmpeg) | ✅ |
+| Captura del audio del sistema (WASAPI loopback) | ✅ |
 | VAD por energía | ✅ |
 | STT (whisper.cpp) | ✅ |
 | Cerebro LLM (Ollama + nube) | ⬜ |
@@ -48,6 +49,7 @@ de adivinar:
 npm run mic-check              # ¿capta el micro? Ritmo y nivel en dBFS
 npm run mic-check -- 10        # ...durante 10s
 npm run spike:stt-file -- x.wav  # ¿transcribe? Sin micro de por medio
+npm run spike:system           # transcribe lo que SUENA en el PC (loopback)
 npm test                       # ¿segmenta el VAD? Con audio sintético
 ```
 
@@ -154,9 +156,9 @@ El motor no sabe que existe una UI: expondrá un servidor WebSocket local y la
 app del avatar será un cliente delgado. Esto no es ceremonia — es lo que permite
 cambiar NodeGui por otra capa de presentación sin reescribir el cerebro.
 
-### Por qué procesos externos y no módulos nativos
+### Por qué procesos externos y (casi) ningún módulo nativo
 
-La cadena audio→texto **no usa ningún addon `.node`**, y es deliberado:
+La cadena de **micrófono**→texto no usa ningún addon `.node`, y es deliberado:
 
 - Los bindings de whisper publicados en npm traen prebuilds compilados contra el
   ABI de **Electron**, que no cargan en Node; el resto exige compilar whisper.cpp
@@ -167,6 +169,20 @@ La cadena audio→texto **no usa ningún addon `.node`**, y es deliberado:
 En su lugar se spawnean **ffmpeg** y el **binario oficial de whisper.cpp**, que
 publican releases por plataforma. Sin ABI, sin toolchain de compilación, y el
 mismo patrón que ya estaba previsto para Piper.
+
+**La única excepción es el audio del sistema.** Capturar lo que suena en el PC
+(reuniones, vídeos) necesita **WASAPI loopback**, que ffmpeg no soporta. La vía
+automática —sin Mezcla estéreo, sin cable virtual, sin que el usuario habilite
+nada— pasa por un módulo nativo: [`audify`](https://www.npmjs.com/package/audify)
+(RtAudio), con **prebuilds N-API** (no compila en la instalación). Es justo el
+caso que el plan original preveía para módulos nativos con prebuilds. `audify`
+entrega 48 kHz estéreo; se remuestrea a 16 kHz mono con ffmpeg leyendo por
+stdin, así `captureSystemAudio` tiene la **misma interfaz** que `captureMicrophone`
+y el VAD y whisper no distinguen el origen.
+
+> Nota: `npm audit` marca 3 vulnerabilidades altas en `node-tar`, una dependencia
+> de **instalación** de audify (descomprime el prebuild). No va en el código que
+> se ejecuta en runtime.
 
 ## Los cuatro agentes
 
