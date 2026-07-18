@@ -14,3 +14,5 @@ export { Brain, type ChatMessage, type BrainOptions } from './brain/client.js';
 export { DEFAULT_BRAIN_CONFIG } from './brain/config.js';
 export { resolveModel } from './brain/registry.js';
 export type { BrainConfig, ProviderConfig, ResolvedModel } from './brain/types.js';
+export { createSpeaker } from './tts/speaker.js';
+export { DEFAULT_TTS_CONFIG, type Speaker, type TtsConfig, type VoiceEngine } from './tts/types.js';

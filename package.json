@@ -22,7 +22,8 @@
     "devices": "npm run devices --workspace @alpha/engine",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "tsc --build",
-    "mic-check": "npm run mic-check --workspace @alpha/engine"
+    "mic-check": "npm run mic-check --workspace @alpha/engine",
+    "spike:tts": "npm run spike:tts --workspace @alpha/engine --"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

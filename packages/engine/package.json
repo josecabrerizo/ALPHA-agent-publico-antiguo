@@ -14,10 +14,12 @@
     "spike:system": "tsx src/spikes/system.ts",
     "spike:brain": "tsx src/spikes/brain.ts",
     "devices": "tsx src/spikes/devices.ts",
-    "mic-check": "tsx src/spikes/mic-check.ts"
+    "mic-check": "tsx src/spikes/mic-check.ts",
+    "spike:tts": "tsx src/spikes/tts.ts"
   },
   "dependencies": {
     "audify": "^1.10.1",
+    "msedge-tts": "^2.0.7",
     "openai": "^6.48.0"
   }
 }

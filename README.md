@@ -20,10 +20,11 @@ la cadena **audio→texto**. Lo demás (cerebro, voz, visión, avatar) viene det
 | Captura del audio del sistema (WASAPI loopback) | ✅ |
 | VAD por energía | ✅ |
 | STT (whisper.cpp) | ✅ |
-| Cerebro LLM (Ollama + nube) | ⬜ |
-| Voz (msedge-tts / Piper) | ⬜ |
+| Cerebro LLM (Ollama + nube) | ✅ |
+| Voz (msedge-tts online / SAPI local) | ✅ |
 | Visión de pantalla | ⬜ |
-| Avatar flotante (NodeGui) | ⬜ |
+| Avatar flotante (NodeGui) | ✅ |
+| Bucle completo escuchar→pensar→hablar | ⬜ |
 
 ## Requisitos
 
