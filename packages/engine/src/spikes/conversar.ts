@@ -15,6 +15,7 @@ import { BUILTIN_TOOLS } from '../brain/tools/builtin.js';
 import { createSpeaker } from '../tts/speaker.js';
 import { captureOptionsFromEnv } from '../audio/options.js';
 import { toDbfs } from '../audio/format.js';
+import { loadAlphaSettings } from '../settings.js';
 import { ConversationSession, type ConversationState } from '../conversation/session.js';
 import { AvatarBridge, AVATAR_BRIDGE_PORT } from '../conversation/avatar-bridge.js';
 
@@ -29,19 +30,25 @@ function log(message: string): void {
 }
 
 const captureOptions = await captureOptionsFromEnv();
-const confidential = process.env['ALPHA_CONFIDENCIAL'] === '1';
+
+// La config viene del avatar (config/alpha.settings.json); el entorno solo
+// sobreescribe para pruebas puntuales. El avatar es el panel de control.
+const settings = loadAlphaSettings();
+let model = process.env['ALPHA_MODEL'] ?? settings.model;
+let confidential = process.env['ALPHA_CONFIDENCIAL'] === '1' || settings.confidential;
 
 const whisper = new WhisperTranscriber({ language: process.env['ALPHA_LANG'] ?? 'es' });
 const tools = new ToolRegistry().registerAll(BUILTIN_TOOLS);
-const brain = new Brain({
-  ...(process.env['ALPHA_MODEL'] ? { model: process.env['ALPHA_MODEL'] } : {}),
-  config: { confidential },
-  tools,
-});
-const speaker = createSpeaker({
-  ...(process.env['ALPHA_TTS_ENGINE'] ? { engine: process.env['ALPHA_TTS_ENGINE'] as 'edge' } : {}),
-  confidential,
-});
+
+const makeBrain = () => new Brain({ model, config: { confidential }, tools });
+const makeSpeaker = () =>
+  createSpeaker({
+    ...(process.env['ALPHA_TTS_ENGINE'] ? { engine: process.env['ALPHA_TTS_ENGINE'] as 'edge' } : {}),
+    confidential,
+  });
+
+let brain = makeBrain();
+let speaker = makeSpeaker();
 
 const brainInfo = brain.describe();
 const voiceInfo = speaker.describe();
@@ -103,6 +110,32 @@ const session = new ConversationSession({
     },
     onError: (where, err) => log(`✗ [${where}] ${err.message}`),
   },
+});
+
+// Cambios de configuracion desde el avatar (modelo, privacidad): se recrean
+// el cerebro y la voz y se aplican al siguiente turno, sin cortar la sesion.
+bridge.onConfigMessage((msg) => {
+  const s = msg.settings;
+  let changed = false;
+  if (s.model && s.model !== model) {
+    model = s.model;
+    changed = true;
+  }
+  if (typeof s.confidential === 'boolean' && s.confidential !== confidential) {
+    confidential = s.confidential;
+    changed = true;
+  }
+  if (!changed) return;
+
+  try {
+    brain = makeBrain();
+    speaker = makeSpeaker();
+    session.reconfigure({ brain, speaker });
+    const info = brain.describe();
+    log(`⚙️  reconfigurado desde el avatar: ${info.provider}/${info.model}${confidential ? ' · confidencial' : ''}`);
+  } catch (err) {
+    log(`✗ [config] ${(err as Error).message}`);
+  }
 });
 
 // Heartbeat: si lleva mas de 3s sin cambiar de estado (y no esta escuchando),

@@ -63,6 +63,9 @@ export class AvatarWindow {
   private dragDX = 0;
   private dragDY = 0;
 
+  /** Se llama al cambiar la config en el menu, para propagarla al motor. */
+  private onSettingsChanged: ((settings: Settings) => void) | undefined;
+
   constructor() {
     this.setupWindow();
     this.setupOrb();
@@ -77,6 +80,16 @@ export class AvatarWindow {
 
   setState(state: AvatarState): void {
     this.state = state;
+  }
+
+  /** Registra quien recibe los cambios de config (para mandarlos al motor). */
+  setOnSettingsChanged(cb: (settings: Settings) => void): void {
+    this.onSettingsChanged = cb;
+  }
+
+  /** La config actual, para sincronizar el motor al conectar. */
+  getSettings(): Settings {
+    return this.settings;
   }
 
   /** Muestra una linea de texto bajo el orbe, que se esfuma sola. */
@@ -178,6 +191,7 @@ export class AvatarWindow {
     this.settings = { ...this.settings, ...patch };
     saveSettings(this.settings);
     this.paintOrb();
+    this.onSettingsChanged?.(this.settings);
   }
 
   private action(text: string, onTrigger: () => void, opts: { checked?: boolean; enabled?: boolean } = {}): QAction {

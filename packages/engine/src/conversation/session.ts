@@ -39,8 +39,8 @@ export interface ConversationDeps {
  */
 export class ConversationSession {
   private readonly whisper: WhisperTranscriber;
-  private readonly brain: Brain;
-  private readonly speaker: Speaker;
+  private brain: Brain;
+  private speaker: Speaker;
   private readonly cb: ConversationCallbacks;
   private readonly captureOptions: CaptureOptions;
   private readonly history: ChatMessage[] = [];
@@ -54,6 +54,19 @@ export class ConversationSession {
     this.speaker = deps.speaker;
     this.cb = deps.callbacks ?? {};
     this.captureOptions = deps.capture ?? {};
+  }
+
+  /**
+   * Sustituye el cerebro y/o la voz en caliente (cambio de modelo o de
+   * privacidad desde el avatar). Se aplica al siguiente turno; no interrumpe
+   * uno en curso. El historial se conserva.
+   */
+  reconfigure(next: { brain?: Brain; speaker?: Speaker }): void {
+    if (next.brain) this.brain = next.brain;
+    if (next.speaker) {
+      this.speaker.stop();
+      this.speaker = next.speaker;
+    }
   }
 
   async run(): Promise<void> {

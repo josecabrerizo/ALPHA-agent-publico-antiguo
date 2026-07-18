@@ -14,7 +14,16 @@ export type BridgeMessage =
   | { type: 'user'; text: string }
   | { type: 'assistant'; text: string };
 
+/** Avatar -> motor: la config elegida en el menu. */
+export interface ConfigMessage {
+  type: 'config';
+  settings: { agent?: string; model?: string; confidential?: boolean };
+}
+
 export interface BridgeHandle {
+  /** Envia la config al motor. Si no hay conexion, se ignora (el motor la leera
+   *  del fichero al arrancar). */
+  send(msg: ConfigMessage): void;
   close(): void;
 }
 
@@ -53,6 +62,9 @@ export function connectBridge(onMessage: (msg: BridgeMessage) => void): BridgeHa
 
   connect();
   return {
+    send(msg: ConfigMessage) {
+      if (socket?.writable) socket.write(JSON.stringify(msg) + '\n');
+    },
     close() {
       closed = true;
       socket?.destroy();

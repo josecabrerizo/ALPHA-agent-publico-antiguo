@@ -14,20 +14,34 @@ import type { ConversationState } from './session.js';
 /** Puerto fijo en localhost. Alto y poco comun para no chocar. */
 export const AVATAR_BRIDGE_PORT = 43117;
 
+/** Motor -> avatar: estado y texto. */
 export type AvatarMessage =
   | { type: 'state'; state: ConversationState | 'reposo' }
   | { type: 'user'; text: string }
   | { type: 'assistant'; text: string };
 
+/** Avatar -> motor: cambios de configuracion desde el menu. */
+export interface AlphaConfigMessage {
+  type: 'config';
+  settings: { agent?: string; model?: string; confidential?: boolean };
+}
+
 export class AvatarBridge {
   private server: net.Server | undefined;
   private readonly clients = new Set<net.Socket>();
+  private readonly onConfig: ((msg: AlphaConfigMessage) => void)[] = [];
+
+  /** Se suscribe a los cambios de config que manda el avatar. */
+  onConfigMessage(handler: (msg: AlphaConfigMessage) => void): void {
+    this.onConfig.push(handler);
+  }
 
   /** Arranca el servidor. Resuelve cuando escucha (o si el puerto esta ocupado). */
   async start(): Promise<void> {
     return new Promise((resolve) => {
       const server = net.createServer((socket) => {
         this.clients.add(socket);
+        this.readFrom(socket);
         socket.on('close', () => this.clients.delete(socket));
         socket.on('error', () => this.clients.delete(socket));
       });
@@ -35,6 +49,26 @@ export class AvatarBridge {
       server.listen(AVATAR_BRIDGE_PORT, '127.0.0.1', () => resolve());
       server.on('error', () => resolve()); // si el puerto esta ocupado, seguimos sin avatar
       this.server = server;
+    });
+  }
+
+  /** Lee mensajes entrantes del avatar (JSON por linea) y despacha los de config. */
+  private readFrom(socket: net.Socket): void {
+    let buffer = '';
+    socket.on('data', (chunk: Buffer) => {
+      buffer += chunk.toString('utf8');
+      let nl: number;
+      while ((nl = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        if (!line) continue;
+        try {
+          const msg = JSON.parse(line) as AlphaConfigMessage;
+          if (msg.type === 'config') for (const h of this.onConfig) h(msg);
+        } catch {
+          // linea corrupta: ignorar
+        }
+      }
     });
   }
 

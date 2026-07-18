@@ -23,6 +23,12 @@ const bridge = connectBridge((msg) => {
 });
 (globalThis as Record<string, unknown>)['__alphaBridge'] = bridge;
 
+// Lo que se cambie en el menu del avatar viaja al motor: el avatar es el panel
+// de control. (Si el motor no esta conectado, lo leera del fichero al arrancar.)
+avatar.setOnSettingsChanged((settings) => {
+  bridge.send({ type: 'config', settings });
+});
+
 console.log('A.L.P.H.A. avatar en marcha.');
 console.log('  · Arrastra con el boton izquierdo para moverlo.');
 console.log('  · Clic derecho: menu de configuracion (avatar, modelo, privacidad).');
