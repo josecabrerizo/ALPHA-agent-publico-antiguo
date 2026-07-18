@@ -16,6 +16,7 @@ import { createSpeaker } from '../tts/speaker.js';
 import { captureOptionsFromEnv } from '../audio/options.js';
 import { toDbfs } from '../audio/format.js';
 import { ConversationSession, type ConversationState } from '../conversation/session.js';
+import { AvatarBridge, AVATAR_BRIDGE_PORT } from '../conversation/avatar-bridge.js';
 
 /** Marca de tiempo estilo Java: HH:MM:SS.mmm. */
 function stamp(): string {
@@ -50,6 +51,11 @@ console.log(`  Cerebro:   ${brainInfo.provider}/${brainInfo.model} ${brainInfo.l
 console.log(`  Voz:       ${voiceInfo.engine}/${voiceInfo.voice} ${voiceInfo.local ? '(local)' : '(nube)'}`);
 console.log(`  Herramientas: ${tools.list().map((t) => t.name).join(', ')}`);
 if (confidential) console.log(`  Modo confidencial: ON (sin nube)`);
+
+// Puente hacia el avatar: si esta abierto, refleja el estado y el texto.
+const bridge = new AvatarBridge();
+await bridge.start();
+console.log(`  Avatar: escuchando en 127.0.0.1:${AVATAR_BRIDGE_PORT} (lanza "npm run avatar" para verlo)`);
 console.log(`  Habla cuando quieras. Ctrl+C para salir.\n`);
 
 const ICON: Record<ConversationState, string> = { escuchando: '👂', pensando: '🧠', hablando: '🗣️' };
@@ -73,6 +79,7 @@ const session = new ConversationSession({
       state = s;
       stateSince = Date.now();
       log(`${ICON[s]} ${s}`);
+      bridge.broadcast({ type: 'state', state: s });
     },
     onLevel: (level, speaking) => {
       peak = Math.max(peak, level);
@@ -86,8 +93,14 @@ const session = new ConversationSession({
       }
     },
     onLog: (m) => log(`   ${m}`),
-    onUserText: (t) => log(`tú    › ${t}`),
-    onAssistantText: (t) => log(`ALPHA › ${t}`),
+    onUserText: (t) => {
+      log(`tú    › ${t}`);
+      bridge.broadcast({ type: 'user', text: t });
+    },
+    onAssistantText: (t) => {
+      log(`ALPHA › ${t}`);
+      bridge.broadcast({ type: 'assistant', text: t });
+    },
     onError: (where, err) => log(`✗ [${where}] ${err.message}`),
   },
 });
@@ -103,6 +116,7 @@ const heartbeat = setInterval(() => {
 process.on('SIGINT', () => {
   clearInterval(heartbeat);
   session.stop();
+  bridge.stop();
   console.log('\n  Hasta luego.\n');
   process.exit(0);
 });

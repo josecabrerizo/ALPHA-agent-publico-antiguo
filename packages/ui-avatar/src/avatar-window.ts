@@ -1,6 +1,7 @@
 import {
   QMainWindow,
   QWidget,
+  QLabel,
   QMenu,
   QAction,
   QPoint,
@@ -9,13 +10,19 @@ import {
   WindowType,
   WidgetEventTypes,
   MouseButton,
+  TextFormat,
 } from '@nodegui/nodegui';
 import { STATE_RHYTHMS, STATE_CYCLE, MAX_PULSE, type AvatarState } from './states.js';
 import { AGENTS, AGENT_ORDER, type AgentId } from './agents.js';
 import { loadSettings, saveSettings, MODEL_OPTIONS, type Settings } from './settings.js';
 
-const WINDOW_SIZE = 200; // lienzo; el orbe pulsa dentro con margen de sobra
+// Lienzo mas alto que ancho: el orbe arriba, el bocadillo de texto abajo.
+const WIN_W = 260;
+const WIN_H = 320;
+const ORB_CX = WIN_W / 2;
+const ORB_CY = 105; // centro vertical del orbe, en la zona alta
 const BASE_RADIUS = 62;
+const CAPTION_MS = 8000; // cuanto se queda el ultimo texto antes de esfumarse
 
 /**
  * Crea un submenu. Rodea un bug de NodeGui 0.74: `addMenu(titulo)` pasa al
@@ -39,10 +46,12 @@ export class AvatarWindow {
   private readonly win = new QMainWindow();
   private readonly root = new QWidget();
   private readonly orb = new QWidget();
+  private readonly caption = new QLabel();
 
   private settings: Settings = loadSettings();
   private state: AvatarState = 'reposo';
   private timer: NodeJS.Timeout | undefined;
+  private captionTimer: NodeJS.Timeout | undefined;
   private phase = 0;
 
   // El menu y sus acciones se guardan para que el GC no se los lleve mientras
@@ -57,6 +66,7 @@ export class AvatarWindow {
   constructor() {
     this.setupWindow();
     this.setupOrb();
+    this.setupCaption();
     this.setupMouse();
     this.startBreathing();
   }
@@ -69,13 +79,23 @@ export class AvatarWindow {
     this.state = state;
   }
 
+  /** Muestra una linea de texto bajo el orbe, que se esfuma sola. */
+  showCaption(text: string): void {
+    const clean = text.trim();
+    if (!clean) return;
+    this.caption.setText(clean);
+    this.caption.show();
+    if (this.captionTimer) clearTimeout(this.captionTimer);
+    this.captionTimer = setTimeout(() => this.caption.hide(), CAPTION_MS);
+  }
+
   private setupWindow(): void {
     this.win.setWindowFlag(WindowType.FramelessWindowHint, true);
     this.win.setWindowFlag(WindowType.WindowStaysOnTopHint, true);
     this.win.setWindowFlag(WindowType.Tool, true);
     this.win.setAttribute(WidgetAttribute.WA_TranslucentBackground, true);
-    this.win.resize(WINDOW_SIZE, WINDOW_SIZE);
-    this.win.setFixedSize(WINDOW_SIZE, WINDOW_SIZE);
+    this.win.resize(WIN_W, WIN_H);
+    this.win.setFixedSize(WIN_W, WIN_H);
 
     this.root.setInlineStyle('background: transparent;');
     this.win.setCentralWidget(this.root);
@@ -84,6 +104,24 @@ export class AvatarWindow {
   private setupOrb(): void {
     this.orb.setParent(this.root);
     this.paintOrb();
+  }
+
+  /** Bocadillo de texto bajo el orbe. Oculto hasta que llega algo que decir. */
+  private setupCaption(): void {
+    this.caption.setParent(this.root);
+    this.caption.setGeometry(12, 208, WIN_W - 24, WIN_H - 216);
+    this.caption.setWordWrap(true);
+    this.caption.setTextFormat(TextFormat.PlainText);
+    this.caption.setInlineStyle(`
+      color: rgba(255, 255, 255, 235);
+      background: rgba(20, 22, 30, 190);
+      border: 1px solid rgba(255, 255, 255, 40);
+      border-radius: 12px;
+      padding: 8px 10px;
+      font-size: 12px;
+      qproperty-alignment: 'AlignHCenter | AlignTop';
+    `);
+    this.caption.hide();
   }
 
   /** Estilo del orbe: color del agente activo, degradado radial y halo. */
@@ -230,10 +268,9 @@ export class AvatarWindow {
       const { breatheMs, pulse } = STATE_RHYTHMS[this.state];
       this.phase += (1000 / FPS / breatheMs) * 2 * Math.PI;
       const radius = BASE_RADIUS + Math.sin(this.phase) * pulse;
-      const center = WINDOW_SIZE / 2;
       this.orb.setGeometry(
-        Math.round(center - radius),
-        Math.round(center - radius),
+        Math.round(ORB_CX - radius),
+        Math.round(ORB_CY - radius),
         Math.round(radius * 2),
         Math.round(radius * 2),
       );
@@ -242,5 +279,6 @@ export class AvatarWindow {
 
   dispose(): void {
     if (this.timer) clearInterval(this.timer);
+    if (this.captionTimer) clearTimeout(this.captionTimer);
   }
 }
