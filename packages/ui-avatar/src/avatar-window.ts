@@ -16,6 +16,16 @@ import { loadSettings, saveSettings, MODEL_OPTIONS, type Settings } from './sett
 
 const WINDOW_SIZE = 200; // lienzo; el orbe pulsa dentro con margen de sobra
 const BASE_RADIUS = 62;
+
+/**
+ * Crea un submenu. Rodea un bug de NodeGui 0.74: `addMenu(titulo)` pasa al
+ * nativo el SEGUNDO argumento (undefined) en vez del primero, y peta con "A
+ * string was expected". Pasando el titulo en ambas posiciones, el segundo
+ * argumento —el que usa— lleva el texto correcto.
+ */
+function addSubmenu(menu: QMenu, title: string): QMenu {
+  return (menu.addMenu as (a: string, b: string) => QMenu)(title, title);
+}
 // border-radius fijo al radio maximo: Qt lo recorta a la mitad del tamano, asi
 // que el orbe se ve como circulo perfecto a cualquier tamano del latido.
 const CIRCLE_RADIUS = BASE_RADIUS + MAX_PULSE;
@@ -156,7 +166,7 @@ export class AvatarWindow {
     menu.addSeparator();
 
     // Avatar
-    const avatarMenu = menu.addMenu('Avatar');
+    const avatarMenu = addSubmenu(menu, 'Avatar');
     this.menuRefs.push(avatarMenu);
     for (const id of AGENT_ORDER) {
       const agent = AGENTS[id];
@@ -168,7 +178,7 @@ export class AvatarWindow {
     }
 
     // Modelo
-    const modelMenu = menu.addMenu('Modelo');
+    const modelMenu = addSubmenu(menu, 'Modelo');
     this.menuRefs.push(modelMenu);
     for (const opt of MODEL_OPTIONS) {
       // En modo confidencial, los modelos de nube quedan deshabilitados.
@@ -193,7 +203,9 @@ export class AvatarWindow {
     menu.addSeparator();
     menu.addAction(this.action('Salir', () => this.win.close()));
 
-    menu.popup(new QPoint(x, y));
+    // exec (modal) en vez de popup: popup es no bloqueante y el menu puede
+    // desvanecerse antes de renderizarse.
+    menu.exec(new QPoint(x, y));
   }
 
   private toggleConfidential(): void {
