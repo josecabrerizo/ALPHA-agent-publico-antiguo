@@ -12,12 +12,13 @@ const PORT = 43117;
 export type BridgeMessage =
   | { type: 'state'; state: 'reposo' | 'escuchando' | 'pensando' | 'hablando' }
   | { type: 'user'; text: string }
-  | { type: 'assistant'; text: string };
+  | { type: 'assistant'; text: string }
+  | { type: 'devices'; inputs: { name: string; isDefault: boolean }[]; current?: string };
 
 /** Avatar -> motor: la config elegida en el menu. */
 export interface ConfigMessage {
   type: 'config';
-  settings: { agent?: string; model?: string; confidential?: boolean };
+  settings: { agent?: string; model?: string; confidential?: boolean; audioDevice?: string };
 }
 
 export interface BridgeHandle {

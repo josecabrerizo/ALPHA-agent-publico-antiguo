@@ -14,26 +14,33 @@ import type { ConversationState } from './session.js';
 /** Puerto fijo en localhost. Alto y poco comun para no chocar. */
 export const AVATAR_BRIDGE_PORT = 43117;
 
-/** Motor -> avatar: estado y texto. */
+/** Motor -> avatar: estado, texto y lista de microfonos disponibles. */
 export type AvatarMessage =
   | { type: 'state'; state: ConversationState | 'reposo' }
   | { type: 'user'; text: string }
-  | { type: 'assistant'; text: string };
+  | { type: 'assistant'; text: string }
+  | { type: 'devices'; inputs: { name: string; isDefault: boolean }[]; current?: string };
 
 /** Avatar -> motor: cambios de configuracion desde el menu. */
 export interface AlphaConfigMessage {
   type: 'config';
-  settings: { agent?: string; model?: string; confidential?: boolean };
+  settings: { agent?: string; model?: string; confidential?: boolean; audioDevice?: string };
 }
 
 export class AvatarBridge {
   private server: net.Server | undefined;
   private readonly clients = new Set<net.Socket>();
   private readonly onConfig: ((msg: AlphaConfigMessage) => void)[] = [];
+  private readonly onConnect: (() => void)[] = [];
 
   /** Se suscribe a los cambios de config que manda el avatar. */
   onConfigMessage(handler: (msg: AlphaConfigMessage) => void): void {
     this.onConfig.push(handler);
+  }
+
+  /** Se suscribe a la conexion de un avatar (para mandarle el estado inicial). */
+  onClientConnect(handler: () => void): void {
+    this.onConnect.push(handler);
   }
 
   /** Arranca el servidor. Resuelve cuando escucha (o si el puerto esta ocupado). */
@@ -44,6 +51,7 @@ export class AvatarBridge {
         this.readFrom(socket);
         socket.on('close', () => this.clients.delete(socket));
         socket.on('error', () => this.clients.delete(socket));
+        for (const h of this.onConnect) h();
       });
       // Solo localhost: nada de exponerlo a la red.
       server.listen(AVATAR_BRIDGE_PORT, '127.0.0.1', () => resolve());

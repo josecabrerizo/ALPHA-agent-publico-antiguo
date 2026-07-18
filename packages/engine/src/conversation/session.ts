@@ -42,11 +42,12 @@ export class ConversationSession {
   private brain: Brain;
   private speaker: Speaker;
   private readonly cb: ConversationCallbacks;
-  private readonly captureOptions: CaptureOptions;
+  private captureOptions: CaptureOptions;
   private readonly history: ChatMessage[] = [];
 
   private handle: CaptureHandle | undefined;
   private running = false;
+  private restartRequested = false;
 
   constructor(deps: ConversationDeps) {
     this.whisper = deps.whisper;
@@ -69,23 +70,45 @@ export class ConversationSession {
     }
   }
 
+  /**
+   * Cambia el microfono en caliente. Cortar la captura actual hace que el
+   * bucle de escucha termine y se reinicie con el nuevo dispositivo.
+   */
+  setAudioDevice(device: string): void {
+    if (device === this.captureOptions.device) return;
+    this.captureOptions = { ...this.captureOptions, device };
+    this.restartRequested = true;
+    this.handle?.stop();
+  }
+
   async run(): Promise<void> {
     this.running = true;
-    const capture = captureMicrophone(this.captureOptions);
-    // Sin esto ffmpeg se bloquea cuando un turno tarda mas que el buffer del pipe.
-    capture.pcm.setMaxListeners(0);
-    this.handle = capture;
+    // Bucle externo: cada vuelta abre la captura y escucha hasta que el stream
+    // termina. Un cambio de microfono corta la captura y provoca otra vuelta.
+    do {
+      this.restartRequested = false;
+      const capture = captureMicrophone(this.captureOptions);
+      // Sin esto ffmpeg se bloquea cuando un turno tarda mas que el buffer del pipe.
+      capture.pcm.setMaxListeners(0);
+      this.handle = capture;
 
-    this.cb.onState?.('escuchando');
-    for await (const utterance of detectUtterances(capture.pcm, {
-      ...(this.cb.onLevel ? { onLevel: this.cb.onLevel } : {}),
-    })) {
-      if (!this.running) break;
-      this.cb.onLog?.(`voz recibida: ${(utterance.speechMs / 1000).toFixed(1)}s de habla`);
-      await this.handleTurn(utterance.pcm);
-      if (!this.running) break;
       this.cb.onState?.('escuchando');
-    }
+      try {
+        for await (const utterance of detectUtterances(capture.pcm, {
+          ...(this.cb.onLevel ? { onLevel: this.cb.onLevel } : {}),
+        })) {
+          if (!this.running || this.restartRequested) break;
+          this.cb.onLog?.(`voz recibida: ${(utterance.speechMs / 1000).toFixed(1)}s de habla`);
+          await this.handleTurn(utterance.pcm);
+          if (!this.running || this.restartRequested) break;
+          this.cb.onState?.('escuchando');
+        }
+      } catch (error) {
+        this.cb.onError?.('captura', error as Error);
+      }
+      capture.stop();
+      if (this.restartRequested) this.cb.onLog?.(`cambiando de microfono a: ${this.captureOptions.device}`);
+    } while (this.running && this.restartRequested);
   }
 
   private async handleTurn(pcm: Buffer): Promise<void> {

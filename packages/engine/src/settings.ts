@@ -13,12 +13,15 @@ export interface AlphaSettings {
   /** Ref proveedor/modelo, como en brain/config.ts. */
   model: string;
   confidential: boolean;
+  /** Nombre del microfono elegido. Vacio = el predeterminado del sistema. */
+  audioDevice: string;
 }
 
 const DEFAULTS: AlphaSettings = {
   agent: 'unit-a',
   model: 'ollama/gemma4:12b',
   confidential: false,
+  audioDevice: '',
 };
 
 // src/settings.ts (tsx) o dist/settings.js -> repoRoot: tres niveles arriba.

@@ -20,6 +20,7 @@ const bridge = connectBridge((msg) => {
   if (msg.type === 'state') avatar.setState(msg.state);
   else if (msg.type === 'user') avatar.showCaption(`tú: ${msg.text}`);
   else if (msg.type === 'assistant') avatar.showCaption(msg.text);
+  else if (msg.type === 'devices') avatar.setMicDevices(msg.inputs);
 });
 (globalThis as Record<string, unknown>)['__alphaBridge'] = bridge;
 

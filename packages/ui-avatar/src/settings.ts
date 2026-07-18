@@ -14,12 +14,15 @@ export interface Settings {
   model: string;
   /** Modo confidencial: sin nube. */
   confidential: boolean;
+  /** Microfono elegido. Vacio = el predeterminado del sistema. */
+  audioDevice: string;
 }
 
 const DEFAULTS: Settings = {
   agent: DEFAULT_AGENT,
   model: 'ollama/gemma4:12b',
   confidential: false,
+  audioDevice: '',
 };
 
 // dist/settings.js -> repoRoot: packages/ui-avatar/dist -> tres niveles arriba.

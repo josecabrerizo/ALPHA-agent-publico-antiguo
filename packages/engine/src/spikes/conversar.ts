@@ -14,6 +14,7 @@ import { ToolRegistry } from '../brain/tools/registry.js';
 import { BUILTIN_TOOLS } from '../brain/tools/builtin.js';
 import { createSpeaker } from '../tts/speaker.js';
 import { captureOptionsFromEnv } from '../audio/options.js';
+import { listInputDevices } from '../audio/devices.js';
 import { toDbfs } from '../audio/format.js';
 import { loadAlphaSettings } from '../settings.js';
 import { ConversationSession, type ConversationState } from '../conversation/session.js';
@@ -36,6 +37,10 @@ const captureOptions = await captureOptionsFromEnv();
 const settings = loadAlphaSettings();
 let model = process.env['ALPHA_MODEL'] ?? settings.model;
 let confidential = process.env['ALPHA_CONFIDENCIAL'] === '1' || settings.confidential;
+// Microfono: entorno > config del avatar > predeterminado del sistema.
+if (!process.env['ALPHA_AUDIO_DEVICE'] && settings.audioDevice) {
+  captureOptions.device = settings.audioDevice;
+}
 
 const whisper = new WhisperTranscriber({ language: process.env['ALPHA_LANG'] ?? 'es' });
 const tools = new ToolRegistry().registerAll(BUILTIN_TOOLS);
@@ -112,10 +117,32 @@ const session = new ConversationSession({
   },
 });
 
-// Cambios de configuracion desde el avatar (modelo, privacidad): se recrean
-// el cerebro y la voz y se aplican al siguiente turno, sin cortar la sesion.
+// Manda al avatar la lista de microfonos disponibles (al arrancar y cada vez
+// que un avatar se conecta), marcando el activo.
+async function sendDevices(): Promise<void> {
+  try {
+    const inputs = (await listInputDevices()).map((d) => ({ name: d.name, isDefault: d.isDefault }));
+    bridge.broadcast({ type: 'devices', inputs, current: captureOptions.device });
+  } catch (err) {
+    log(`✗ [devices] ${(err as Error).message}`);
+  }
+}
+bridge.onClientConnect(() => void sendDevices());
+void sendDevices();
+
+// Cambios de configuracion desde el avatar (modelo, privacidad, microfono): se
+// aplican en caliente sin cortar la sesion.
 bridge.onConfigMessage((msg) => {
   const s = msg.settings;
+
+  // Microfono: reinicia la captura con el nuevo dispositivo.
+  if (typeof s.audioDevice === 'string' && s.audioDevice && s.audioDevice !== captureOptions.device) {
+    captureOptions.device = s.audioDevice;
+    session.setAudioDevice(s.audioDevice);
+    log(`⚙️  microfono desde el avatar: ${s.audioDevice}`);
+  }
+
+  // Cerebro y voz: recrear si cambia modelo o privacidad.
   let changed = false;
   if (s.model && s.model !== model) {
     model = s.model;

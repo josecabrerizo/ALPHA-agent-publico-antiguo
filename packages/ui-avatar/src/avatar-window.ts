@@ -66,6 +66,9 @@ export class AvatarWindow {
   /** Se llama al cambiar la config en el menu, para propagarla al motor. */
   private onSettingsChanged: ((settings: Settings) => void) | undefined;
 
+  /** Microfonos que manda el motor; el menu "Sonido" se llena con ellos. */
+  private micDevices: { name: string; isDefault: boolean }[] = [];
+
   constructor() {
     this.setupWindow();
     this.setupOrb();
@@ -90,6 +93,11 @@ export class AvatarWindow {
   /** La config actual, para sincronizar el motor al conectar. */
   getSettings(): Settings {
     return this.settings;
+  }
+
+  /** Recibe del motor la lista de microfonos disponibles. */
+  setMicDevices(inputs: { name: string; isDefault: boolean }[]): void {
+    this.micDevices = inputs;
   }
 
   /** Muestra una linea de texto bajo el orbe, que se esfuma sola. */
@@ -241,6 +249,24 @@ export class AvatarWindow {
           enabled: !blocked,
         }),
       );
+    }
+
+    // Sonido (microfono)
+    const soundMenu = addSubmenu(menu, 'Sonido');
+    this.menuRefs.push(soundMenu);
+    if (this.micDevices.length === 0) {
+      soundMenu.addAction(this.action('(motor no conectado)', () => {}, { enabled: false }));
+    } else {
+      for (const dev of this.micDevices) {
+        // "" en settings = predeterminado del sistema; se marca el que toque.
+        const isCurrent =
+          this.settings.audioDevice === dev.name ||
+          (this.settings.audioDevice === '' && dev.isDefault);
+        const label = dev.isDefault ? `${dev.name}  (predeterminado)` : dev.name;
+        soundMenu.addAction(
+          this.action(label, () => this.update({ audioDevice: dev.name }), { checked: isCurrent }),
+        );
+      }
     }
 
     // Privacidad
