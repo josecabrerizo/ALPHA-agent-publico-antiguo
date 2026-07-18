@@ -16,5 +16,8 @@ models/
 .env.*
 config/local.yaml
 
+# Configuracion en vivo del asistente (la edita el menu del avatar)
+config/alpha.settings.json
+
 .DS_Store
 Thumbs.db

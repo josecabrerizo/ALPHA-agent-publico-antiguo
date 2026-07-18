@@ -15,5 +15,5 @@ avatar.show();
 
 console.log('A.L.P.H.A. avatar en marcha.');
 console.log('  · Arrastra con el boton izquierdo para moverlo.');
-console.log('  · Clic derecho para cambiar de estado (reposo/escuchando/pensando/hablando).');
-console.log('  · Doble clic para cerrar.');
+console.log('  · Clic derecho: menu de configuracion (avatar, modelo, privacidad).');
+console.log('  · Doble clic: cambia de estado (reposo/escuchando/pensando/hablando).');

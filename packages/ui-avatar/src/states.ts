@@ -1,26 +1,27 @@
 /**
- * Los cuatro estados de animacion del avatar. Son ortogonales a los cuatro
- * AGENTES (Vulpis.AI, Unit-A, Nexus, Synapse): cada agente tendra su propio
- * juego de sprites, y cada sprite un estado. Aqui, con el orbe de marcador de
- * posicion, el estado se expresa como color y ritmo de "respiracion".
+ * Los cuatro estados de animacion del avatar. Ortogonales al AGENTE: el agente
+ * (agents.ts) da el COLOR de identidad; el estado da el RITMO de la respiracion
+ * (y su amplitud). Asi un mismo agente se ve igual de color pero "respira"
+ * distinto segun este en reposo, escuchando, pensando o hablando.
  */
 export type AvatarState = 'reposo' | 'escuchando' | 'pensando' | 'hablando';
 
-export interface StateStyle {
-  /** Color central del orbe, RGB. */
-  color: [number, number, number];
+export interface StateRhythm {
   /** Periodo de la respiracion en ms: mas corto = mas nervioso. */
   breatheMs: number;
   /** Amplitud del pulso en px sobre el radio base. */
   pulse: number;
 }
 
-export const STATE_STYLES: Record<AvatarState, StateStyle> = {
-  reposo: { color: [90, 140, 235], breatheMs: 3400, pulse: 5 }, // azul sereno
-  escuchando: { color: [70, 200, 130], breatheMs: 1500, pulse: 9 }, // verde atento
-  pensando: { color: [235, 175, 70], breatheMs: 900, pulse: 7 }, // ambar inquieto
-  hablando: { color: [170, 110, 235], breatheMs: 650, pulse: 12 }, // violeta activo
+export const STATE_RHYTHMS: Record<AvatarState, StateRhythm> = {
+  reposo: { breatheMs: 3400, pulse: 5 },
+  escuchando: { breatheMs: 1500, pulse: 9 },
+  pensando: { breatheMs: 900, pulse: 7 },
+  hablando: { breatheMs: 650, pulse: 12 },
 };
 
-/** Orden de rotacion al ciclar estados manualmente (clic derecho). */
+/** Orden de rotacion al ciclar estados (doble clic, para pruebas). */
 export const STATE_CYCLE: AvatarState[] = ['reposo', 'escuchando', 'pensando', 'hablando'];
+
+/** El pulso mas amplio de todos los estados, para clavar el circulo (ver window). */
+export const MAX_PULSE = Math.max(...Object.values(STATE_RHYTHMS).map((s) => s.pulse));
