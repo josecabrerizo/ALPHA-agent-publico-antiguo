@@ -5,8 +5,10 @@
   "description": "A.L.P.H.A. — Asistente Local Proactivo Hibrido Abierto",
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.16.0",
+    "npm": ">=10.9.2"
   },
+  "packageManager": "npm@10.9.2",
   "workspaces": [
     "packages/*"
   ],
@@ -15,6 +17,7 @@
     "spike:stt": "npm run spike:stt --workspace @alpha/engine",
     "spike:stt-file": "npm run spike:stt-file --workspace @alpha/engine --",
     "spike:system": "npm run spike:system --workspace @alpha/engine",
+    "avatar": "npm run dev --workspace @alpha/ui-avatar",
     "devices": "npm run devices --workspace @alpha/engine",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "tsc --build",

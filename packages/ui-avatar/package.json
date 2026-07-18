@@ -1,0 +1,14 @@
+{
+  "name": "@alpha/ui-avatar",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Avatar flotante de A.L.P.H.A.: ventana translucida, siempre encima y arrastrable (NodeGui/Qt)",
+  "scripts": {
+    "build": "tsc --build",
+    "start": "node run.mjs",
+    "dev": "tsc --build && node run.mjs"
+  },
+  "dependencies": {
+    "@nodegui/nodegui": "^0.74.2"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // NodeGui corre sobre qode (CommonJS) y es un modulo CJS: este paquete
+    // compila a CommonJS, a diferencia del motor (ESM). verbatimModuleSyntax
+    // se apaga para poder importar los nombres de NodeGui sin friccion.
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "verbatimModuleSyntax": false,
+    "rootDir": "./src",
+    "outDir": "./dist"
+  },
+  "include": ["src/**/*.ts"]
+}
