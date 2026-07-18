@@ -10,12 +10,23 @@ import { detectUtterances, type Utterance } from '../audio/vad.js';
 import { WhisperTranscriber } from '../stt/whisper.js';
 
 const capture_opts = await captureOptionsFromEnv();
-const transcriber = new WhisperTranscriber({ language: process.env['ALPHA_LANG'] ?? 'es' });
+// Un prompt corto en espanol correcto ancla el idioma y la ortografia; whisper
+// lo trata como lo dicho justo antes. ALPHA_STT_PROMPT lo sobrescribe.
+const initialPrompt =
+  process.env['ALPHA_STT_PROMPT'] ??
+  'Conversacion en espanol con el asistente A.L.P.H.A.';
+const beamSize = Number(process.env['ALPHA_STT_BEAM'] ?? 5);
+const transcriber = new WhisperTranscriber({
+  language: process.env['ALPHA_LANG'] ?? 'es',
+  beamSize: Number.isFinite(beamSize) ? beamSize : 5,
+  initialPrompt,
+});
 
 console.log(`\n  A.L.P.H.A. — spike audio→texto`);
 console.log(`  Microfono: ${capture_opts.device}`);
 if (capture_opts.gainDb) console.log(`  Ganancia:  +${capture_opts.gainDb} dB`);
 if (capture_opts.normalize) console.log(`  Normalizacion dinamica: activada`);
+console.log(`  Decodificacion: beam=${beamSize}`);
 console.log(`  Habla normalmente. Ctrl+C para salir.\n`);
 
 const capture = captureMicrophone(capture_opts);

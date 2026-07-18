@@ -16,7 +16,12 @@ if (!file) {
   process.exit(1);
 }
 
-const transcriber = new WhisperTranscriber({ language: process.env['ALPHA_LANG'] ?? 'es' });
+const beamSize = Number(process.env['ALPHA_STT_BEAM'] ?? 5);
+const transcriber = new WhisperTranscriber({
+  language: process.env['ALPHA_LANG'] ?? 'es',
+  beamSize: Number.isFinite(beamSize) ? beamSize : 5,
+  ...(process.env['ALPHA_STT_PROMPT'] ? { initialPrompt: process.env['ALPHA_STT_PROMPT'] } : {}),
+});
 
 console.log(`\n  Fichero: ${file}`);
 const pcm = await decodeToPcm(file);

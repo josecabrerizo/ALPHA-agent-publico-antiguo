@@ -15,6 +15,19 @@ export interface WhisperOptions {
   /** Codigo ISO ('es', 'en') o 'auto' para detectar. */
   language?: string;
   threads?: number;
+  /**
+   * Tamano del haz de busqueda. Por defecto whisper-cli decodifica en modo
+   * voraz (beam=1): rapido pero se traga silabas con mala diccion. Con un haz
+   * de 5 explora varias hipotesis y acierta bastante mas, a cambio de algo mas
+   * de CPU. 0/1 = voraz.
+   */
+  beamSize?: number;
+  /**
+   * Texto de contexto que sesga la transcripcion (nombres propios, jerga del
+   * dominio, el idioma). whisper lo usa como "lo dicho justo antes", asi que
+   * ancla el vocabulario esperado.
+   */
+  initialPrompt?: string;
 }
 
 /**
@@ -30,6 +43,8 @@ export class WhisperTranscriber {
   private readonly modelPath: string;
   private readonly language: string;
   private readonly threads: number;
+  private readonly beamSize: number;
+  private readonly initialPrompt: string | undefined;
   private checked = false;
 
   constructor(options: WhisperOptions = {}) {
@@ -37,6 +52,8 @@ export class WhisperTranscriber {
     this.modelPath = options.modelPath ?? whisperModel();
     this.language = options.language ?? 'es';
     this.threads = options.threads ?? Math.min(8, Math.max(1, availableParallelism() - 2));
+    this.beamSize = options.beamSize ?? 5;
+    this.initialPrompt = options.initialPrompt;
   }
 
   /** Transcribe un tramo de PCM s16le 16 kHz mono. Cadena vacia si no hay habla. */
@@ -47,7 +64,7 @@ export class WhisperTranscriber {
     const wavPath = path.join(dir, 'utterance.wav');
     try {
       await writeFile(wavPath, pcmToWav(pcm));
-      const { stdout } = await execFileAsync(this.binaryPath, [
+      const args = [
         '-m',
         this.modelPath,
         '-f',
@@ -58,7 +75,11 @@ export class WhisperTranscriber {
         String(this.threads),
         '-nt', // sin marcas de tiempo
         '-np', // sin cabeceras ni progreso: solo el texto
-      ]);
+      ];
+      if (this.beamSize > 1) args.push('-bs', String(this.beamSize));
+      if (this.initialPrompt) args.push('--prompt', this.initialPrompt);
+
+      const { stdout } = await execFileAsync(this.binaryPath, args);
       return cleanTranscript(stdout);
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -82,14 +103,20 @@ export class WhisperTranscriber {
 }
 
 /**
- * whisper.cpp marca el silencio y el ruido con etiquetas entre corchetes o
- * parentesis ([BLANK_AUDIO], (musica de fondo)). Dejarlas pasar convertiria
- * un carraspeo en un turno de conversacion.
+ * Limpia la salida cruda de whisper.cpp:
+ * - Etiquetas de ruido/silencio entre corchetes o parentesis ([BLANK_AUDIO],
+ *   (musica)): dejarlas pasar convertiria un carraspeo en un turno.
+ * - Marcas de turno ">>" que whisper hereda de sus datos de subtitulos.
  */
 function cleanTranscript(stdout: string): string {
   return stdout
     .split(/\r?\n/)
-    .map((line) => line.replace(/[[(][^\])]*[\])]/g, '').trim())
+    .map((line) =>
+      line
+        .replace(/[[(][^\])]*[\])]/g, '') // [BLANK_AUDIO], (musica)
+        .replace(/^\s*>>+\s*/, '') // marca de turno al inicio
+        .trim(),
+    )
     .filter((line) => line.length > 0)
     .join(' ')
     .trim();
