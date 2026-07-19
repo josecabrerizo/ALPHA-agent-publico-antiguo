@@ -49,16 +49,19 @@ const skills = new SkillLibrary(skillsDir);
 await skills.load();
 const tools = new ToolRegistry().registerAll(BUILTIN_TOOLS).registerAll(skills.tools());
 
-const makeBrain = () =>
-  new Brain({ model, config: { confidential }, tools, skillsPrompt: () => skills.promptSection() });
-const makeSpeaker = () =>
+// Toman los valores por parametro (no del cierre) para poder construir y
+// validar candidatos ANTES de comprometer el estado — reconfiguracion
+// transaccional.
+const makeBrain = (m: string, conf: boolean) =>
+  new Brain({ model: m, config: { confidential: conf }, tools, skillsPrompt: () => skills.promptSection() });
+const makeSpeaker = (conf: boolean) =>
   createSpeaker({
     ...(process.env['ALPHA_TTS_ENGINE'] ? { engine: process.env['ALPHA_TTS_ENGINE'] as 'edge' } : {}),
-    confidential,
+    confidential: conf,
   });
 
-let brain = makeBrain();
-let speaker = makeSpeaker();
+let brain = makeBrain(model, confidential);
+let speaker = makeSpeaker(confidential);
 
 const brainInfo = brain.describe();
 const voiceInfo = speaker.describe();
@@ -157,25 +160,28 @@ bridge.onConfigMessage((msg) => {
   }
 
   // Cerebro y voz: recrear si cambia modelo o privacidad.
-  let changed = false;
-  if (s.model && s.model !== model) {
-    model = s.model;
-    changed = true;
-  }
-  if (typeof s.confidential === 'boolean' && s.confidential !== confidential) {
-    confidential = s.confidential;
-    changed = true;
-  }
-  if (!changed) return;
+  const nextModel = s.model && s.model !== model ? s.model : model;
+  const nextConfidential = typeof s.confidential === 'boolean' ? s.confidential : confidential;
+  if (nextModel === model && nextConfidential === confidential) return;
 
   try {
-    brain = makeBrain();
-    speaker = makeSpeaker();
+    // Se construye y VALIDA el candidato antes de tocar nada: describe() llama a
+    // resolveModel, que lanza si el modelo no cuadra (p. ej. nube en
+    // confidencial, proveedor desconocido o clave ausente).
+    const nextBrain = makeBrain(nextModel, nextConfidential);
+    const info = nextBrain.describe();
+    const nextSpeaker = makeSpeaker(nextConfidential);
+
+    // Solo ahora, con todo construido y validado, se compromete el estado.
+    brain = nextBrain;
+    speaker = nextSpeaker;
+    model = nextModel;
+    confidential = nextConfidential;
     session.reconfigure({ brain, speaker });
-    const info = brain.describe();
     log(`⚙️  reconfigurado desde el avatar: ${info.provider}/${info.model}${confidential ? ' · confidencial' : ''}`);
   } catch (err) {
-    log(`✗ [config] ${(err as Error).message}`);
+    // Falla la validacion: se mantiene la config anterior intacta.
+    log(`✗ [config] ${(err as Error).message} — se mantiene la configuracion anterior`);
   }
 });
 

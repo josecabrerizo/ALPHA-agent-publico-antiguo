@@ -13,6 +13,12 @@ import { SpeechQueue, splitSentences } from './speech-queue.js';
 const STT_TIMEOUT_MS = 120_000;
 const LLM_TIMEOUT_MS = 120_000;
 
+// Ventana de historial: se conservan los ultimos N mensajes (unos 12 turnos).
+// Evita que la latencia y el gasto crezcan sin fin y desborden el contexto en
+// conversaciones largas. Un resumen progresivo del historial viejo queda para
+// mas adelante; de momento, ventana deslizante.
+const MAX_HISTORY_MESSAGES = 24;
+
 /** Estado del asistente, el mismo eje que las animaciones del avatar. */
 export type ConversationState = 'escuchando' | 'pensando' | 'hablando';
 
@@ -269,6 +275,10 @@ export class ConversationSession {
       if (full.trim()) {
         this.cb.onAssistantText?.(full);
         this.history.push({ role: 'assistant', content: full });
+      }
+      // Ventana deslizante: se descartan los turnos mas viejos por el frente.
+      if (this.history.length > MAX_HISTORY_MESSAGES) {
+        this.history.splice(0, this.history.length - MAX_HISTORY_MESSAGES);
       }
     } finally {
       this.busy = false;
