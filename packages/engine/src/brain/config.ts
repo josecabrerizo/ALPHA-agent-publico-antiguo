@@ -21,7 +21,11 @@ export const DEFAULT_BRAIN_CONFIG: BrainConfig = {
       baseUrl: 'http://127.0.0.1:11434/v1',
       apiKey: 'ollama', // Ollama ignora la clave pero el cliente OpenAI la exige
       local: true,
-      models: ['gemma4:12b'],
+      // OJO: gemma4:31b-cloud corre en la nube de Ollama aunque se acceda por
+      // el endpoint local. El registro es local a nivel de proveedor, asi que
+      // el modo confidencial no lo bloquea por si solo; el menu del avatar si
+      // lo marca como nube. Convendria un flag por-modelo en el futuro.
+      models: ['gemma4:12b', 'gemma4:31b-cloud'],
     },
     anthropic: {
       baseUrl: 'https://api.anthropic.com/v1',

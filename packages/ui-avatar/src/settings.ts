@@ -53,6 +53,9 @@ export function saveSettings(settings: Settings): void {
 /** Modelos ofrecidos en el menu. Reflejan los proveedores del cerebro. */
 export const MODEL_OPTIONS: { ref: string; label: string; local: boolean }[] = [
   { ref: 'ollama/gemma4:12b', label: 'Gemma 4 12B (local)', local: true },
+  // Corre en la nube de Ollama pese a acceder por el endpoint local: no es
+  // local a efectos de privacidad, el modo confidencial lo bloquea.
+  { ref: 'ollama/gemma4:31b-cloud', label: 'Gemma 4 31B (Ollama cloud)', local: false },
   { ref: 'anthropic/claude-sonnet-5', label: 'Claude Sonnet 5 (nube)', local: false },
   { ref: 'openai/gpt-5.1', label: 'GPT-5.1 (nube)', local: false },
   { ref: 'gemini/gemini-2.5-flash', label: 'Gemini 2.5 Flash (nube)', local: false },

@@ -35,7 +35,9 @@ cerebro:
       base_url: http://127.0.0.1:11434/v1
       api_key: ollama         # Ollama la ignora, pero el cliente la exige
       local: true             # disponible en modo confidencial
-      modelos: [gemma4:12b]
+      # gemma4:31b-cloud corre en la nube de Ollama (los datos salen), pese a
+      # acceder por el endpoint local. El menu del avatar lo marca como nube.
+      modelos: [gemma4:12b, gemma4:31b-cloud]
     anthropic:
       base_url: https://api.anthropic.com/v1
       api_key_env: ANTHROPIC_API_KEY   # nunca el secreto en el fichero
