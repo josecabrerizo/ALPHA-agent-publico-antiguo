@@ -25,6 +25,11 @@ export interface BrainOptions {
   temperature?: number;
   /** Herramientas disponibles para el bucle agentico. Si no, no hay tool-calling. */
   tools?: ToolRegistry;
+  /**
+   * Seccion de skills para el prompt del sistema (nombres y descripciones). Es
+   * una funcion porque la lista cambia si el agente crea skills nuevas.
+   */
+  skillsPrompt?: () => string;
 }
 
 /** Eventos del bucle agentico, para trazar el uso de herramientas y la voz. */
@@ -48,6 +53,7 @@ export class Brain {
   private readonly maxTokens: number;
   private readonly temperature: number;
   private readonly tools: ToolRegistry | undefined;
+  private readonly skillsPrompt: (() => string) | undefined;
 
   constructor(options: BrainOptions = {}) {
     this.config = { ...DEFAULT_BRAIN_CONFIG, ...options.config };
@@ -56,6 +62,7 @@ export class Brain {
     this.maxTokens = options.maxTokens ?? 512;
     this.temperature = options.temperature ?? 0.6;
     this.tools = options.tools;
+    this.skillsPrompt = options.skillsPrompt;
   }
 
   /** Proveedor y modelo que se usaran, ya resueltos (para mostrarlos). */
@@ -139,6 +146,8 @@ export class Brain {
           '\n\nTienes herramientas disponibles. Cuando la respuesta dependa de datos ' +
           'reales del momento o del equipo (hora, fecha, estado del ordenador, etc.), ' +
           'USA la herramienta correspondiente en lugar de adivinar o suponer.';
+        const skills = this.skillsPrompt?.();
+        if (skills) first.content += `\n\n${skills}`;
       }
     }
     const ctx = { confidential: this.config.confidential };

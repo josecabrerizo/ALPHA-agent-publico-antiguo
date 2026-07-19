@@ -11,6 +11,7 @@ export const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)
 
 export const vendorDir = path.join(repoRoot, 'vendor');
 export const modelsDir = path.join(repoRoot, 'models');
+export const skillsDir = path.join(repoRoot, 'skills');
 
 export const whisperBinary = path.join(
   vendorDir,

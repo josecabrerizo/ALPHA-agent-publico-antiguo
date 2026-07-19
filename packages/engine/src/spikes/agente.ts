@@ -11,17 +11,25 @@ import { stdin, stdout } from 'node:process';
 import { Brain, type ChatMessage } from '../brain/client.js';
 import { ToolRegistry } from '../brain/tools/registry.js';
 import { BUILTIN_TOOLS } from '../brain/tools/builtin.js';
+import { SkillLibrary } from '../brain/skills/library.js';
+import { skillsDir } from '../paths.js';
 
-const tools = new ToolRegistry().registerAll(BUILTIN_TOOLS);
+const skills = new SkillLibrary(skillsDir);
+await skills.load();
+
+const tools = new ToolRegistry().registerAll(BUILTIN_TOOLS).registerAll(skills.tools());
 const brain = new Brain({
   ...(process.env['ALPHA_MODEL'] ? { model: process.env['ALPHA_MODEL'] } : {}),
   tools,
+  skillsPrompt: () => skills.promptSection(),
 });
 
 const info = brain.describe();
-console.log(`\n  A.L.P.H.A. — spike agente (con herramientas)`);
+console.log(`\n  A.L.P.H.A. — spike agente (con herramientas y skills)`);
 console.log(`  Modelo: ${info.provider}/${info.model} ${info.local ? '(local)' : '(nube)'}`);
 console.log(`  Herramientas: ${tools.list().map((t) => t.name).join(', ')}`);
+console.log(`  Skills: ${skills.list().map((s) => s.name).join(', ') || '(ninguna)'}`);
+for (const sk of skills.skippedSkills()) console.log(`    (omitida: ${sk.name} — ${sk.reason})`);
 console.log(`  Escribe y pulsa Enter. Ctrl+C para salir.\n`);
 
 const history: ChatMessage[] = [];

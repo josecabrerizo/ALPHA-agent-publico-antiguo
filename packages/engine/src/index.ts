@@ -14,6 +14,9 @@ export { Brain, type ChatMessage, type BrainOptions, type AgentEvent } from './b
 export { ToolRegistry } from './brain/tools/registry.js';
 export { BUILTIN_TOOLS } from './brain/tools/builtin.js';
 export type { Tool, ToolContext } from './brain/tools/types.js';
+export { SkillLibrary } from './brain/skills/library.js';
+export { loadSkills } from './brain/skills/loader.js';
+export type { Skill } from './brain/skills/types.js';
 export { DEFAULT_BRAIN_CONFIG } from './brain/config.js';
 export { resolveModel } from './brain/registry.js';
 export type { BrainConfig, ProviderConfig, ResolvedModel } from './brain/types.js';

@@ -12,6 +12,8 @@ import { WhisperTranscriber } from '../stt/whisper.js';
 import { Brain } from '../brain/client.js';
 import { ToolRegistry } from '../brain/tools/registry.js';
 import { BUILTIN_TOOLS } from '../brain/tools/builtin.js';
+import { SkillLibrary } from '../brain/skills/library.js';
+import { skillsDir } from '../paths.js';
 import { createSpeaker } from '../tts/speaker.js';
 import { captureOptionsFromEnv } from '../audio/options.js';
 import { listInputDevices } from '../audio/devices.js';
@@ -43,9 +45,12 @@ if (!process.env['ALPHA_AUDIO_DEVICE'] && settings.audioDevice) {
 }
 
 const whisper = new WhisperTranscriber({ language: process.env['ALPHA_LANG'] ?? 'es' });
-const tools = new ToolRegistry().registerAll(BUILTIN_TOOLS);
+const skills = new SkillLibrary(skillsDir);
+await skills.load();
+const tools = new ToolRegistry().registerAll(BUILTIN_TOOLS).registerAll(skills.tools());
 
-const makeBrain = () => new Brain({ model, config: { confidential }, tools });
+const makeBrain = () =>
+  new Brain({ model, config: { confidential }, tools, skillsPrompt: () => skills.promptSection() });
 const makeSpeaker = () =>
   createSpeaker({
     ...(process.env['ALPHA_TTS_ENGINE'] ? { engine: process.env['ALPHA_TTS_ENGINE'] as 'edge' } : {}),
@@ -62,6 +67,7 @@ console.log(`  Microfono: ${captureOptions.device}${captureOptions.gainDb ? ` (+
 console.log(`  Cerebro:   ${brainInfo.provider}/${brainInfo.model} ${brainInfo.local ? '(local)' : '(nube)'}`);
 console.log(`  Voz:       ${voiceInfo.engine}/${voiceInfo.voice} ${voiceInfo.local ? '(local)' : '(nube)'}`);
 console.log(`  Herramientas: ${tools.list().map((t) => t.name).join(', ')}`);
+console.log(`  Skills: ${skills.list().map((s) => s.name).join(', ') || '(ninguna)'}`);
 if (confidential) console.log(`  Modo confidencial: ON (sin nube)`);
 
 // Puente hacia el avatar: si esta abierto, refleja el estado y el texto.
