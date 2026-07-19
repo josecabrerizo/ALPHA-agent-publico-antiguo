@@ -49,6 +49,7 @@ export class ConversationSession {
   private handle: CaptureHandle | undefined;
   private running = false;
   private restartRequested = false;
+  private busy = false; // hay un turno (voz o texto) en curso
 
   constructor(deps: ConversationDeps) {
     this.whisper = deps.whisper;
@@ -149,11 +150,13 @@ export class ConversationSession {
     }
   }
 
+  /**
+   * Turno de voz: transcribe el audio y responde. La transcripcion es lo unico
+   * propio del canal de voz; el resto (pensar y hablar) lo comparte con el
+   * texto via respondTo.
+   */
   private async handleTurn(pcm: Buffer): Promise<void> {
     const t0 = performance.now();
-    const ms = (from: number) => Math.round(performance.now() - from);
-
-    // 1) Pensar (transcribir).
     this.cb.onState?.('pensando');
     this.cb.onLog?.('transcribiendo…');
     let text: string;
@@ -164,58 +167,87 @@ export class ConversationSession {
       return;
     }
     if (!text) {
-      this.cb.onLog?.(`transcrito en ${ms(t0)}ms: sin habla reconocida (ruido)`);
+      this.cb.onLog?.(`transcrito en ${Math.round(performance.now() - t0)}ms: sin habla (ruido)`);
       return;
     }
-    this.cb.onLog?.(`transcrito en ${ms(t0)}ms`);
+    this.cb.onLog?.(`transcrito en ${Math.round(performance.now() - t0)}ms`);
     this.cb.onUserText?.(text);
-    this.history.push({ role: 'user', content: text });
+    await this.respondTo(text);
+  }
 
-    // 2) Pensar (LLM, con herramientas) + 3) Hablar, en tuberia: las frases se
-    //    dicen conforme el cerebro las termina; si pide herramientas, se
-    //    ejecutan y sigue.
-    this.cb.onLog?.('consultando al cerebro…');
-    const tBrain = performance.now();
-    const queue = new SpeechQueue(this.speaker, () => this.cb.onState?.('hablando'));
-    let full = '';
-    let buffer = '';
-    let firstToken = false;
-    try {
-      for await (const ev of this.brain.runAgentic(this.history)) {
-        if (ev.type === 'tool-start') {
-          this.cb.onState?.('pensando');
-          this.cb.onLog?.(`herramienta: ${ev.name}(${ev.args || ''})`);
-          continue;
-        }
-        if (ev.type === 'tool-end') {
-          this.cb.onLog?.(`  → ${ev.result}`);
-          continue;
-        }
-        // ev.type === 'text'
-        if (!firstToken) {
-          firstToken = true;
-          this.cb.onLog?.(`primer token del cerebro en ${ms(tBrain)}ms`);
-        }
-        full += ev.delta;
-        buffer += ev.delta;
-        const { sentences, rest } = splitSentences(buffer);
-        for (const sentence of sentences) queue.enqueue(sentence);
-        buffer = rest;
-      }
-      if (buffer.trim()) queue.enqueue(buffer);
-      this.cb.onLog?.(`respuesta generada en ${ms(tBrain)}ms; terminando de hablar…`);
-      await queue.drain();
-    } catch (error) {
-      queue.stop();
-      this.cb.onError?.('brain', error as Error);
+  /**
+   * Entrada de texto (chat escrito): responde igual que a la voz, compartiendo
+   * historial y cerebro. Para aligerar conversaciones sin hablar.
+   */
+  async sendText(text: string): Promise<void> {
+    const clean = text.trim();
+    if (!clean) return;
+    if (this.busy) {
+      this.cb.onLog?.('ocupado; espera a que termine el turno actual');
       return;
     }
+    this.cb.onLog?.(`texto › ${clean}`);
+    this.cb.onUserText?.(clean);
+    await this.respondTo(clean);
+    this.cb.onState?.('escuchando');
+  }
 
-    if (full.trim()) {
-      this.cb.onAssistantText?.(full);
-      this.history.push({ role: 'assistant', content: full });
+  /**
+   * Pensar (LLM con herramientas) + hablar, en tuberia: las frases se dicen
+   * conforme el cerebro las termina; si pide herramientas, se ejecutan y sigue.
+   * Comun a la voz y al texto. El flag busy evita que un turno pise a otro.
+   */
+  private async respondTo(text: string): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    const ms = (from: number) => Math.round(performance.now() - from);
+    try {
+      this.history.push({ role: 'user', content: text });
+      this.cb.onState?.('pensando');
+      this.cb.onLog?.('consultando al cerebro…');
+      const tBrain = performance.now();
+      const queue = new SpeechQueue(this.speaker, () => this.cb.onState?.('hablando'));
+      let full = '';
+      let buffer = '';
+      let firstToken = false;
+      try {
+        for await (const ev of this.brain.runAgentic(this.history)) {
+          if (ev.type === 'tool-start') {
+            this.cb.onState?.('pensando');
+            this.cb.onLog?.(`herramienta: ${ev.name}(${ev.args || ''})`);
+            continue;
+          }
+          if (ev.type === 'tool-end') {
+            this.cb.onLog?.(`  → ${ev.result}`);
+            continue;
+          }
+          // ev.type === 'text'
+          if (!firstToken) {
+            firstToken = true;
+            this.cb.onLog?.(`primer token del cerebro en ${ms(tBrain)}ms`);
+          }
+          full += ev.delta;
+          buffer += ev.delta;
+          const { sentences, rest } = splitSentences(buffer);
+          for (const sentence of sentences) queue.enqueue(sentence);
+          buffer = rest;
+        }
+        if (buffer.trim()) queue.enqueue(buffer);
+        this.cb.onLog?.(`respuesta generada en ${ms(tBrain)}ms; terminando de hablar…`);
+        await queue.drain();
+      } catch (error) {
+        queue.stop();
+        this.cb.onError?.('brain', error as Error);
+        return;
+      }
+
+      if (full.trim()) {
+        this.cb.onAssistantText?.(full);
+        this.history.push({ role: 'assistant', content: full });
+      }
+    } finally {
+      this.busy = false;
     }
-    this.cb.onLog?.(`turno completo en ${ms(t0)}ms`);
   }
 
   stop(): void {

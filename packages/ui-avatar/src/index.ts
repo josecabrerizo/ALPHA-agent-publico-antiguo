@@ -50,6 +50,16 @@ avatar.setOnSettingsChanged((settings) => {
   log(`config → motor: agente=${settings.agent}, modelo=${settings.model}, confidencial=${settings.confidential}, micro=${settings.audioDevice || '(sistema)'}`);
 });
 
+// Chat escrito: Enter en el campo del avatar manda el texto al motor.
+avatar.setOnTextSubmit((text) => {
+  avatar.showCaption(`tú: ${text}`);
+  if (bridge.sendText(text)) log(`texto → motor: ${text}`);
+  else {
+    log('no hay motor conectado; el mensaje escrito no se envió');
+    avatar.showCaption('(sin motor: arranca "npm run spike:conversar")');
+  }
+});
+
 log('A.L.P.H.A. avatar en marcha.');
 console.log('  · Arrastra con el botón izquierdo para moverlo.');
 console.log('  · Clic derecho: menú de configuración (avatar, modelo, sonido, privacidad).');

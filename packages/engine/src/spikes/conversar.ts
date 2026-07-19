@@ -134,6 +134,9 @@ async function sendDevices(): Promise<void> {
 bridge.onClientConnect(() => void sendDevices());
 void sendDevices();
 
+// Chat escrito desde el avatar: se responde como a la voz, mismo historial.
+bridge.onTextInput((text) => void session.sendText(text));
+
 // Cambios de configuracion desde el avatar (modelo, privacidad, microfono): se
 // aplican en caliente sin cortar la sesion.
 bridge.onConfigMessage((msg) => {

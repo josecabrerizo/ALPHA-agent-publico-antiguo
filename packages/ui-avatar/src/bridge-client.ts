@@ -21,10 +21,18 @@ export interface ConfigMessage {
   settings: { agent?: string; model?: string; confidential?: boolean; audioDevice?: string };
 }
 
+/** Avatar -> motor: un mensaje escrito. */
+export interface TextInputMessage {
+  type: 'text-input';
+  text: string;
+}
+
 export interface BridgeHandle {
   /** Envia la config al motor. Si no hay conexion, se ignora (el motor la leera
    *  del fichero al arrancar). */
   send(msg: ConfigMessage): void;
+  /** Envia un mensaje escrito. Devuelve false si no hay motor conectado. */
+  sendText(text: string): boolean;
   close(): void;
 }
 
@@ -65,6 +73,12 @@ export function connectBridge(onMessage: (msg: BridgeMessage) => void): BridgeHa
   return {
     send(msg: ConfigMessage) {
       if (socket?.writable) socket.write(JSON.stringify(msg) + '\n');
+    },
+    sendText(text: string): boolean {
+      if (!socket?.writable) return false;
+      const msg: TextInputMessage = { type: 'text-input', text };
+      socket.write(JSON.stringify(msg) + '\n');
+      return true;
     },
     close() {
       closed = true;

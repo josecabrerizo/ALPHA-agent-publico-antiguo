@@ -2,6 +2,7 @@ import {
   QMainWindow,
   QWidget,
   QLabel,
+  QLineEdit,
   QMenu,
   QAction,
   QPoint,
@@ -16,13 +17,14 @@ import { STATE_RHYTHMS, STATE_CYCLE, MAX_PULSE, type AvatarState } from './state
 import { AGENTS, AGENT_ORDER, type AgentId } from './agents.js';
 import { loadSettings, saveSettings, MODEL_OPTIONS, type Settings } from './settings.js';
 
-// Lienzo mas alto que ancho: el orbe arriba, el bocadillo de texto abajo.
+// Lienzo mas alto que ancho: el orbe arriba, el bocadillo en medio, el campo de
+// texto abajo.
 const WIN_W = 260;
-const WIN_H = 320;
+const WIN_H = 372;
 const ORB_CX = WIN_W / 2;
-const ORB_CY = 105; // centro vertical del orbe, en la zona alta
+const ORB_CY = 100; // centro vertical del orbe, en la zona alta
 const BASE_RADIUS = 62;
-const CAPTION_MS = 8000; // cuanto se queda el ultimo texto antes de esfumarse
+const CAPTION_MS = 9000; // cuanto se queda el ultimo texto antes de esfumarse
 
 /**
  * Crea un submenu. Rodea un bug de NodeGui 0.74: `addMenu(titulo)` pasa al
@@ -47,6 +49,10 @@ export class AvatarWindow {
   private readonly root = new QWidget();
   private readonly orb = new QWidget();
   private readonly caption = new QLabel();
+  private readonly input = new QLineEdit();
+
+  /** Se llama al enviar un mensaje escrito (Enter en el campo de texto). */
+  private onTextSubmit: ((text: string) => void) | undefined;
 
   private settings: Settings = loadSettings();
   private state: AvatarState = 'reposo';
@@ -73,6 +79,7 @@ export class AvatarWindow {
     this.setupWindow();
     this.setupOrb();
     this.setupCaption();
+    this.setupInput();
     this.setupMouse();
     this.startBreathing();
   }
@@ -88,6 +95,11 @@ export class AvatarWindow {
   /** Registra quien recibe los cambios de config (para mandarlos al motor). */
   setOnSettingsChanged(cb: (settings: Settings) => void): void {
     this.onSettingsChanged = cb;
+  }
+
+  /** Registra quien recibe los mensajes escritos (chat de texto). */
+  setOnTextSubmit(cb: (text: string) => void): void {
+    this.onTextSubmit = cb;
   }
 
   /** La config actual, para sincronizar el motor al conectar. */
@@ -130,7 +142,7 @@ export class AvatarWindow {
   /** Bocadillo de texto bajo el orbe. Oculto hasta que llega algo que decir. */
   private setupCaption(): void {
     this.caption.setParent(this.root);
-    this.caption.setGeometry(12, 208, WIN_W - 24, WIN_H - 216);
+    this.caption.setGeometry(12, 186, WIN_W - 24, 132);
     this.caption.setWordWrap(true);
     this.caption.setTextFormat(TextFormat.PlainText);
     this.caption.setInlineStyle(`
@@ -143,6 +155,27 @@ export class AvatarWindow {
       qproperty-alignment: 'AlignHCenter | AlignTop';
     `);
     this.caption.hide();
+  }
+
+  /** Campo de chat escrito, siempre visible al pie. Enter envia y limpia. */
+  private setupInput(): void {
+    this.input.setParent(this.root);
+    this.input.setGeometry(12, WIN_H - 42, WIN_W - 24, 32);
+    this.input.setPlaceholderText('Escribe a A.L.P.H.A.…');
+    this.input.setInlineStyle(`
+      color: rgba(255, 255, 255, 240);
+      background: rgba(30, 33, 44, 220);
+      border: 1px solid rgba(255, 255, 255, 55);
+      border-radius: 16px;
+      padding: 4px 12px;
+      font-size: 12px;
+    `);
+    this.input.addEventListener('returnPressed', () => {
+      const text = this.input.text().trim();
+      if (!text) return;
+      this.input.clear();
+      this.onTextSubmit?.(text);
+    });
   }
 
   /** Estilo del orbe: color del agente activo, degradado radial y halo. */

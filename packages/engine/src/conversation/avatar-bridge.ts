@@ -27,15 +27,29 @@ export interface AlphaConfigMessage {
   settings: { agent?: string; model?: string; confidential?: boolean; audioDevice?: string };
 }
 
+/** Avatar -> motor: mensaje escrito (chat de texto). */
+export interface AlphaTextMessage {
+  type: 'text-input';
+  text: string;
+}
+
+type IncomingMessage = AlphaConfigMessage | AlphaTextMessage;
+
 export class AvatarBridge {
   private server: net.Server | undefined;
   private readonly clients = new Set<net.Socket>();
   private readonly onConfig: ((msg: AlphaConfigMessage) => void)[] = [];
+  private readonly onText: ((text: string) => void)[] = [];
   private readonly onConnect: (() => void)[] = [];
 
   /** Se suscribe a los cambios de config que manda el avatar. */
   onConfigMessage(handler: (msg: AlphaConfigMessage) => void): void {
     this.onConfig.push(handler);
+  }
+
+  /** Se suscribe a los mensajes escritos del avatar (chat de texto). */
+  onTextInput(handler: (text: string) => void): void {
+    this.onText.push(handler);
   }
 
   /** Se suscribe a la conexion de un avatar (para mandarle el estado inicial). */
@@ -71,8 +85,10 @@ export class AvatarBridge {
         buffer = buffer.slice(nl + 1);
         if (!line) continue;
         try {
-          const msg = JSON.parse(line) as AlphaConfigMessage;
+          const msg = JSON.parse(line) as IncomingMessage;
           if (msg.type === 'config') for (const h of this.onConfig) h(msg);
+          else if (msg.type === 'text-input' && typeof msg.text === 'string')
+            for (const h of this.onText) h(msg.text);
         } catch {
           // linea corrupta: ignorar
         }
