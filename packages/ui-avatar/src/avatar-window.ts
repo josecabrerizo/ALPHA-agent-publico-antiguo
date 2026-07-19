@@ -17,14 +17,16 @@ import { STATE_RHYTHMS, STATE_CYCLE, MAX_PULSE, type AvatarState } from './state
 import { AGENTS, AGENT_ORDER, type AgentId } from './agents.js';
 import { loadSettings, saveSettings, MODEL_OPTIONS, type Settings } from './settings.js';
 
-// Lienzo mas alto que ancho: el orbe arriba, el bocadillo en medio, el campo de
-// texto abajo.
-const WIN_W = 260;
-const WIN_H = 372;
+const WIN_W = 280;
 const ORB_CX = WIN_W / 2;
-const ORB_CY = 100; // centro vertical del orbe, en la zona alta
+const ORB_CY = 92; // centro vertical del orbe, en la zona alta
 const BASE_RADIUS = 62;
 const CAPTION_MS = 9000; // cuanto se queda el ultimo texto antes de esfumarse
+
+const PAD = 12; // margen lateral
+const GAP = 10; // separacion vertical entre piezas
+const INPUT_H = 34;
+const CAPTION_H = 116;
 
 /**
  * Crea un submenu. Rodea un bug de NodeGui 0.74: `addMenu(titulo)` pasa al
@@ -35,9 +37,20 @@ const CAPTION_MS = 9000; // cuanto se queda el ultimo texto antes de esfumarse
 function addSubmenu(menu: QMenu, title: string): QMenu {
   return (menu.addMenu as (a: string, b: string) => QMenu)(title, title);
 }
+
 // border-radius fijo al radio maximo: Qt lo recorta a la mitad del tamano, asi
 // que el orbe se ve como circulo perfecto a cualquier tamano del latido.
 const CIRCLE_RADIUS = BASE_RADIUS + MAX_PULSE;
+
+// Layout con dos alturas: compacta (orbe + campo de texto pegado debajo) y
+// expandida (aparece el bocadillo en medio y el campo baja). Asi en reposo el
+// chat no queda separado del orbe por un hueco vacio.
+const ORB_BOTTOM = ORB_CY + CIRCLE_RADIUS;
+const CAPTION_Y = ORB_BOTTOM + GAP;
+const INPUT_Y_COMPACT = ORB_BOTTOM + GAP;
+const INPUT_Y_EXPANDED = CAPTION_Y + CAPTION_H + GAP;
+const WIN_H_COMPACT = INPUT_Y_COMPACT + INPUT_H + PAD;
+const WIN_H_EXPANDED = INPUT_Y_EXPANDED + INPUT_H + PAD;
 
 /**
  * Ventana flotante del avatar: frameless, translucida, siempre encima y
@@ -112,14 +125,18 @@ export class AvatarWindow {
     this.micDevices = inputs;
   }
 
-  /** Muestra una linea de texto bajo el orbe, que se esfuma sola. */
+  /** Muestra texto en el bocadillo (la ventana se expande) y se esfuma sola. */
   showCaption(text: string): void {
     const clean = text.trim();
     if (!clean) return;
     this.caption.setText(clean);
     this.caption.show();
+    this.layoutExpanded();
     if (this.captionTimer) clearTimeout(this.captionTimer);
-    this.captionTimer = setTimeout(() => this.caption.hide(), CAPTION_MS);
+    this.captionTimer = setTimeout(() => {
+      this.caption.hide();
+      this.layoutCompact();
+    }, CAPTION_MS);
   }
 
   private setupWindow(): void {
@@ -127,11 +144,23 @@ export class AvatarWindow {
     this.win.setWindowFlag(WindowType.WindowStaysOnTopHint, true);
     this.win.setWindowFlag(WindowType.Tool, true);
     this.win.setAttribute(WidgetAttribute.WA_TranslucentBackground, true);
-    this.win.resize(WIN_W, WIN_H);
-    this.win.setFixedSize(WIN_W, WIN_H);
+    this.win.setFixedSize(WIN_W, WIN_H_COMPACT);
 
     this.root.setInlineStyle('background: transparent;');
     this.win.setCentralWidget(this.root);
+  }
+
+  /** Reposo: solo orbe + campo de texto pegado debajo. */
+  private layoutCompact(): void {
+    this.input.setGeometry(PAD, INPUT_Y_COMPACT, WIN_W - 2 * PAD, INPUT_H);
+    this.win.setFixedSize(WIN_W, WIN_H_COMPACT);
+  }
+
+  /** Con respuesta: aparece el bocadillo y el campo baja. */
+  private layoutExpanded(): void {
+    this.win.setFixedSize(WIN_W, WIN_H_EXPANDED);
+    this.caption.setGeometry(PAD, CAPTION_Y, WIN_W - 2 * PAD, CAPTION_H);
+    this.input.setGeometry(PAD, INPUT_Y_EXPANDED, WIN_W - 2 * PAD, INPUT_H);
   }
 
   private setupOrb(): void {
@@ -142,7 +171,7 @@ export class AvatarWindow {
   /** Bocadillo de texto bajo el orbe. Oculto hasta que llega algo que decir. */
   private setupCaption(): void {
     this.caption.setParent(this.root);
-    this.caption.setGeometry(12, 186, WIN_W - 24, 132);
+    this.caption.setGeometry(PAD, CAPTION_Y, WIN_W - 2 * PAD, CAPTION_H);
     this.caption.setWordWrap(true);
     this.caption.setTextFormat(TextFormat.PlainText);
     this.caption.setInlineStyle(`
@@ -157,10 +186,10 @@ export class AvatarWindow {
     this.caption.hide();
   }
 
-  /** Campo de chat escrito, siempre visible al pie. Enter envia y limpia. */
+  /** Campo de chat escrito, pegado al orbe (layout compacto). Enter envia. */
   private setupInput(): void {
     this.input.setParent(this.root);
-    this.input.setGeometry(12, WIN_H - 42, WIN_W - 24, 32);
+    this.input.setGeometry(PAD, INPUT_Y_COMPACT, WIN_W - 2 * PAD, INPUT_H);
     this.input.setPlaceholderText('Escribe a A.L.P.H.A.…');
     this.input.setInlineStyle(`
       color: rgba(255, 255, 255, 240);
