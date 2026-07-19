@@ -24,11 +24,15 @@ export function resolveModel(ref: string, config: BrainConfig): ResolvedModel {
     throw new Error(`Proveedor desconocido: "${providerName}". Configurados: ${disponibles}.`);
   }
 
-  // El modo confidencial es un contrato duro: nada de nube en esa sesion.
-  if (config.confidential && !provider.local) {
+  // Privacidad POR MODELO: el proveedor da el valor base, pero un modelo puede
+  // ser de nube aunque el proveedor sea local (gemma4:31b-cloud). Esta es la
+  // unica comprobacion del contrato confidencial: da igual el canal por el que
+  // se pida el modelo (menu, entorno, TCP), aqui se bloquea siempre.
+  const local = provider.local && !(provider.cloudModels ?? []).includes(model);
+  if (config.confidential && !local) {
     throw new Error(
-      `Modo confidencial activo: el proveedor "${providerName}" es de nube y esta bloqueado. ` +
-        `Usa un proveedor local (p. ej. ollama/...).`,
+      `Modo confidencial activo: el modelo "${ref}" usa la nube y esta bloqueado. ` +
+        `Usa un modelo local (p. ej. ollama/gemma4:12b).`,
     );
   }
 
@@ -40,11 +44,5 @@ export function resolveModel(ref: string, config: BrainConfig): ResolvedModel {
     );
   }
 
-  return {
-    provider: providerName,
-    model,
-    baseUrl: provider.baseUrl,
-    apiKey,
-    local: provider.local,
-  };
+  return { provider: providerName, model, baseUrl: provider.baseUrl, apiKey, local };
 }

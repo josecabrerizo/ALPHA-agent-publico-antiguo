@@ -18,12 +18,19 @@ export interface ProviderConfig {
   /** Nombre de la variable de entorno de donde leer la clave. */
   apiKeyEnv?: string;
   /**
-   * true = corre en la maquina. Es lo que decide si el modo confidencial lo
-   * permite: en confidencial solo se usan proveedores locales.
+   * true = por defecto corre en la maquina. Es el valor base de privacidad de
+   * los modelos del proveedor; se puede afinar por modelo con `cloudModels`.
    */
   local: boolean;
   /** Modelos conocidos de este proveedor (lista informativa / allowlist). */
   models?: string[];
+  /**
+   * Modelos que van a la NUBE aunque el proveedor sea local (p. ej. Ollama es
+   * local, pero gemma4:31b-cloud corre en la nube de Ollama). El modo
+   * confidencial los bloquea. Es lo que hace la privacidad por-modelo y no solo
+   * por-proveedor.
+   */
+  cloudModels?: string[];
 }
 
 export interface BrainConfig {
