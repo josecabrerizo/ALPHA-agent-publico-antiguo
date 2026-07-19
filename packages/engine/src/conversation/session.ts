@@ -7,6 +7,12 @@ import { Brain, type ChatMessage } from '../brain/client.js';
 import type { Speaker } from '../tts/types.js';
 import { SpeechQueue, splitSentences } from './speech-queue.js';
 
+// Limites por fase para que un proceso o proveedor colgado no deje la sesion en
+// "pensando" para siempre. whisper en CPU puede ser lento y un turno con
+// herramientas encadena varias llamadas, de ahi que sean generosos.
+const STT_TIMEOUT_MS = 120_000;
+const LLM_TIMEOUT_MS = 120_000;
+
 /** Estado del asistente, el mismo eje que las animaciones del avatar. */
 export type ConversationState = 'escuchando' | 'pensando' | 'hablando';
 
@@ -51,6 +57,7 @@ export class ConversationSession {
   private running = false;
   private restartRequested = false;
   private busy = false; // hay un turno (voz o texto) en curso
+  private turnController: AbortController | undefined; // cancela el turno actual
 
   constructor(deps: ConversationDeps) {
     this.whisper = deps.whisper;
@@ -162,22 +169,29 @@ export class ConversationSession {
    */
   private async handleTurn(pcm: Buffer): Promise<void> {
     const t0 = performance.now();
+    const controller = new AbortController();
+    this.turnController = controller;
     this.cb.onState?.('pensando');
     this.cb.onLog?.('transcribiendo…');
     let text: string;
     try {
-      text = await this.whisper.transcribe(pcm);
+      text = await this.whisper.transcribe(pcm, {
+        signal: controller.signal,
+        timeoutMs: STT_TIMEOUT_MS,
+      });
     } catch (error) {
-      this.cb.onError?.('stt', error as Error);
+      if (!controller.signal.aborted) this.cb.onError?.('stt', error as Error);
+      this.turnController = undefined;
       return;
     }
     if (!text) {
       this.cb.onLog?.(`transcrito en ${Math.round(performance.now() - t0)}ms: sin habla (ruido)`);
+      this.turnController = undefined;
       return;
     }
     this.cb.onLog?.(`transcrito en ${Math.round(performance.now() - t0)}ms`);
     this.cb.onUserText?.(text);
-    await this.respondTo(text);
+    await this.respondTo(text, controller.signal);
   }
 
   /**
@@ -191,9 +205,11 @@ export class ConversationSession {
       this.cb.onLog?.('ocupado; espera a que termine el turno actual');
       return;
     }
+    const controller = new AbortController();
+    this.turnController = controller;
     this.cb.onLog?.(`texto › ${clean}`);
     this.cb.onUserText?.(clean);
-    await this.respondTo(clean);
+    await this.respondTo(clean, controller.signal);
     this.cb.onState?.('escuchando');
   }
 
@@ -202,7 +218,7 @@ export class ConversationSession {
    * conforme el cerebro las termina; si pide herramientas, se ejecutan y sigue.
    * Comun a la voz y al texto. El flag busy evita que un turno pise a otro.
    */
-  private async respondTo(text: string): Promise<void> {
+  private async respondTo(text: string, signal?: AbortSignal): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     const ms = (from: number) => Math.round(performance.now() - from);
@@ -216,7 +232,10 @@ export class ConversationSession {
       let buffer = '';
       let firstToken = false;
       try {
-        for await (const ev of this.brain.runAgentic(this.history)) {
+        for await (const ev of this.brain.runAgentic(this.history, {
+          ...(signal ? { signal } : {}),
+          timeoutMs: LLM_TIMEOUT_MS,
+        })) {
           if (ev.type === 'tool-start') {
             this.cb.onState?.('pensando');
             this.cb.onLog?.(`herramienta: ${ev.name}(${ev.args || ''})`);
@@ -242,7 +261,8 @@ export class ConversationSession {
         await queue.drain();
       } catch (error) {
         queue.stop();
-        this.cb.onError?.('brain', error as Error);
+        // Si el turno se cancelo (stop, timeout), no es un error que reportar.
+        if (!signal?.aborted) this.cb.onError?.('brain', error as Error);
         return;
       }
 
@@ -252,11 +272,13 @@ export class ConversationSession {
       }
     } finally {
       this.busy = false;
+      this.turnController = undefined;
     }
   }
 
   stop(): void {
     this.running = false;
+    this.turnController?.abort(); // cancela STT/LLM del turno en curso
     this.speaker.stop();
     this.handle?.stop();
   }

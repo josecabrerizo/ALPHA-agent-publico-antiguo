@@ -42,9 +42,31 @@ export class ToolRegistry {
     }
 
     try {
-      return await tool.run(args, ctx);
+      return await withTimeout(tool.run(args, ctx), TOOL_TIMEOUT_MS, name);
     } catch (error) {
       return `Error al ejecutar "${name}": ${(error as Error).message}`;
     }
   }
+}
+
+/** Limite para una herramienta: si su run() se cuelga, no bloquea el turno. */
+const TOOL_TIMEOUT_MS = 30_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, name: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`la herramienta "${name}" tardo mas de ${ms / 1000}s`)),
+      ms,
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }

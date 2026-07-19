@@ -130,8 +130,15 @@ export class Brain {
    * herramienta, esos deltas no son texto sino tool_calls que se acumulan por
    * indice, se ejecutan, y se da otra vuelta.
    */
-  async *runAgentic(history: ChatMessage[]): AsyncGenerator<AgentEvent> {
+  async *runAgentic(
+    history: ChatMessage[],
+    opts: { signal?: AbortSignal; timeoutMs?: number } = {},
+  ): AsyncGenerator<AgentEvent> {
     const { client, model } = this.clientFor();
+    const reqOptions = {
+      ...(opts.signal ? { signal: opts.signal } : {}),
+      timeout: opts.timeoutMs ?? 120_000,
+    };
     const tools = this.tools?.list().map(toOpenAITool);
     // messages lleva el intercambio completo del turno (incluye tool_calls y
     // resultados), que la API tipa de forma farragosa; se maneja como arreglo
@@ -153,17 +160,20 @@ export class Brain {
     const ctx = { confidential: this.config.confidential };
 
     for (let step = 0; step < MAX_TOOL_STEPS; step++) {
-      const stream = await client.chat.completions.create({
-        model,
-        messages: messages as never,
-        // El JSON Schema propio no encaja con el tipo del SDK (index signature);
-        // se castea, igual que messages.
-        ...(tools && tools.length > 0 ? { tools: tools as never } : {}),
-        max_tokens: this.maxTokens,
-        temperature: this.temperature,
-        reasoning_effort: this.reasoningEffort,
-        stream: true,
-      });
+      const stream = await client.chat.completions.create(
+        {
+          model,
+          messages: messages as never,
+          // El JSON Schema propio no encaja con el tipo del SDK (index signature);
+          // se castea, igual que messages.
+          ...(tools && tools.length > 0 ? { tools: tools as never } : {}),
+          max_tokens: this.maxTokens,
+          temperature: this.temperature,
+          reasoning_effort: this.reasoningEffort,
+          stream: true,
+        },
+        reqOptions,
+      );
 
       let text = '';
       const calls = new Map<number, { id: string; name: string; args: string }>();

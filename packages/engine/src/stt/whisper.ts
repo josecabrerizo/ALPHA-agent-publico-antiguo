@@ -56,8 +56,15 @@ export class WhisperTranscriber {
     this.initialPrompt = options.initialPrompt;
   }
 
-  /** Transcribe un tramo de PCM s16le 16 kHz mono. Cadena vacia si no hay habla. */
-  async transcribe(pcm: Buffer): Promise<string> {
+  /**
+   * Transcribe un tramo de PCM s16le 16 kHz mono. Cadena vacia si no hay habla.
+   * `signal` cancela (mata el proceso de whisper) y `timeoutMs` pone un limite
+   * duro para que un whisper colgado no deje la sesion en "pensando" para siempre.
+   */
+  async transcribe(
+    pcm: Buffer,
+    opts: { signal?: AbortSignal; timeoutMs?: number } = {},
+  ): Promise<string> {
     await this.ensureReady();
 
     const dir = await mkdtemp(path.join(tmpdir(), 'alpha-stt-'));
@@ -79,7 +86,12 @@ export class WhisperTranscriber {
       if (this.beamSize > 1) args.push('-bs', String(this.beamSize));
       if (this.initialPrompt) args.push('--prompt', this.initialPrompt);
 
-      const { stdout } = await execFileAsync(this.binaryPath, args);
+      // execFile mata el hijo al abortar o al vencer el timeout (SIGTERM).
+      const { stdout } = await execFileAsync(this.binaryPath, args, {
+        ...(opts.signal ? { signal: opts.signal } : {}),
+        timeout: opts.timeoutMs ?? 120_000,
+        maxBuffer: 4 * 1024 * 1024,
+      });
       return cleanTranscript(stdout);
     } finally {
       await rm(dir, { recursive: true, force: true });
