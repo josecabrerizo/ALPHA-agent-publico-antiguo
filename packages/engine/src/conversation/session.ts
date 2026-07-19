@@ -1,5 +1,6 @@
 import { captureMicrophone, type CaptureHandle, type CaptureOptions } from '../audio/capture.js';
 import { defaultInputDevice } from '../audio/devices.js';
+import { AudioGate } from '../audio/gate.js';
 import { detectUtterances } from '../audio/vad.js';
 import { WhisperTranscriber } from '../stt/whisper.js';
 import { Brain, type ChatMessage } from '../brain/client.js';
@@ -101,20 +102,24 @@ export class ConversationSession {
       this.restartRequested = false;
       const openedAt = performance.now();
       const capture = captureMicrophone(this.captureOptions);
-      // Sin esto ffmpeg se bloquea cuando un turno tarda mas que el buffer del pipe.
-      capture.pcm.setMaxListeners(0);
       this.handle = capture;
+      // La compuerta drena ffmpeg siempre (sin backpressure) y solo pasa audio
+      // al VAD cuando esta abierta. Se cierra mientras se piensa/habla, para no
+      // acumular audio viejo ni recoger la voz del propio asistente.
+      const gate = new AudioGate(capture.pcm);
 
       this.cb.onState?.('escuchando');
       try {
-        for await (const utterance of detectUtterances(capture.pcm, {
+        for await (const utterance of detectUtterances(gate, {
           ...(this.cb.onLevel ? { onLevel: this.cb.onLevel } : {}),
         })) {
           if (!this.running || this.restartRequested) break;
           this.cb.onLog?.(`voz recibida: ${(utterance.speechMs / 1000).toFixed(1)}s de habla`);
+          gate.setOpen(false); // deja de escuchar mientras responde
           await this.handleTurn(utterance.pcm);
           if (!this.running || this.restartRequested) break;
           this.cb.onState?.('escuchando');
+          gate.setOpen(true); // vuelve a escuchar, descartando lo de mientras
         }
       } catch (error) {
         // Al cambiar de micro destruimos el stream a proposito; ese cierre no
