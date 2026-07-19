@@ -15,10 +15,9 @@ import { BUILTIN_TOOLS } from '../brain/tools/builtin.js';
 import { SkillLibrary } from '../brain/skills/library.js';
 import { skillsDir } from '../paths.js';
 import { createSpeaker } from '../tts/speaker.js';
-import { captureOptionsFromEnv } from '../audio/options.js';
-import { listInputDevices } from '../audio/devices.js';
+import { listInputDevices, defaultInputDevice } from '../audio/devices.js';
 import { toDbfs } from '../audio/format.js';
-import { loadAlphaSettings } from '../settings.js';
+import { loadConfig } from '../config/loader.js';
 import { ConversationSession, type ConversationState } from '../conversation/session.js';
 import { AvatarBridge, AVATAR_BRIDGE_PORT } from '../conversation/avatar-bridge.js';
 
@@ -32,31 +31,40 @@ function log(message: string): void {
   console.log(`[${stamp()}] ${message}`);
 }
 
-const captureOptions = await captureOptionsFromEnv();
+// Config unificada: defaults ← default.yaml ← local.yaml ← ajustes del avatar.
+// El entorno solo sobreescribe para pruebas puntuales.
+const config = loadConfig();
+let model = process.env['ALPHA_MODEL'] ?? config.brain.model;
+let confidential = process.env['ALPHA_CONFIDENCIAL'] === '1' || config.confidential;
 
-// La config viene del avatar (config/alpha.settings.json); el entorno solo
-// sobreescribe para pruebas puntuales. El avatar es el panel de control.
-const settings = loadAlphaSettings();
-let model = process.env['ALPHA_MODEL'] ?? settings.model;
-let confidential = process.env['ALPHA_CONFIDENCIAL'] === '1' || settings.confidential;
-// Microfono: entorno > config del avatar > predeterminado del sistema.
-if (!process.env['ALPHA_AUDIO_DEVICE'] && settings.audioDevice) {
-  captureOptions.device = settings.audioDevice;
-}
+const captureOptions = {
+  device: process.env['ALPHA_AUDIO_DEVICE'] ?? config.audio.device,
+  gainDb: process.env['ALPHA_MIC_GAIN'] ? Number(process.env['ALPHA_MIC_GAIN']) : config.audio.gainDb,
+  normalize: process.env['ALPHA_MIC_NORMALIZE'] === '1' || config.audio.normalize,
+};
+// device vacio = el predeterminado del sistema; ffmpeg necesita el nombre real.
+if (!captureOptions.device) captureOptions.device = (await defaultInputDevice()).name;
 
-const whisper = new WhisperTranscriber({ language: process.env['ALPHA_LANG'] ?? 'es' });
+const whisper = new WhisperTranscriber({ language: config.stt.language });
 const skills = new SkillLibrary(skillsDir);
 await skills.load();
 const tools = new ToolRegistry().registerAll(BUILTIN_TOOLS).registerAll(skills.tools());
 
 // Toman los valores por parametro (no del cierre) para poder construir y
 // validar candidatos ANTES de comprometer el estado — reconfiguracion
-// transaccional.
+// transaccional. brain y tts salen de la config unificada.
 const makeBrain = (m: string, conf: boolean) =>
-  new Brain({ model: m, config: { confidential: conf }, tools, skillsPrompt: () => skills.promptSection() });
+  new Brain({
+    model: m,
+    config: { ...config.brain, confidential: conf },
+    tools,
+    skillsPrompt: () => skills.promptSection(),
+  });
 const makeSpeaker = (conf: boolean) =>
   createSpeaker({
-    ...(process.env['ALPHA_TTS_ENGINE'] ? { engine: process.env['ALPHA_TTS_ENGINE'] as 'edge' } : {}),
+    engine: (process.env['ALPHA_TTS_ENGINE'] as 'edge' | 'sapi') ?? config.tts.engine,
+    edgeVoice: config.tts.edgeVoice,
+    sapiVoice: config.tts.sapiVoice,
     confidential: conf,
   });
 

@@ -1,72 +1,61 @@
 # Configuracion por defecto de A.L.P.H.A.
 #
-# AVISO: este fichero DOCUMENTA la forma prevista, pero el codigo AUN NO lo
-# consume: el motor usa sus defaults en TS (brain/config.ts, tts/types.ts...) y
-# la UI los suyos (ui-avatar/settings.ts). Pendiente: un unico esquema versionado
-# con cargador central. Hasta entonces, cambiar los valores aqui no tiene efecto.
+# Este fichero SI se consume: el cargador central (engine/config/loader.ts) lo
+# fusiona sobre los defaults del esquema, luego config/local.yaml, y por ultimo
+# los ajustes en vivo del avatar (config/alpha.settings.json). Las claves casan
+# con el esquema (engine/config/schema.ts): editar aqui tiene efecto.
 #
 # Para ajustes locales sin tocar git: copiar a config/local.yaml (ignorado).
 
-# Modo confidencial: desactiva TODA salida a la nube durante la sesion.
-# La "H" de Hibrido es opcional por diseno; esto es el interruptor.
-confidencial: false
+version: 1
+
+# Modo confidencial: nada de nube durante la sesion. Es la fuente de verdad; se
+# propaga al cerebro y a la voz. La "H" de Hibrido es opcional por diseno.
+confidential: false
+
+# Agente activo (identidad del avatar): vulpis | unit-a | nexus | synapse.
+agent: unit-a
 
 audio:
-  # Nombre exacto del dispositivo. Vacio = el primero del sistema.
-  # Listar con: npm run devices
-  dispositivo: ''
-  vad:
-    hangoverMs: 700       # silencio que cierra un tramo hablado
-    minUtteranceMs: 300   # por debajo, es un chasquido y se descarta
-    preRollMs: 300        # audio previo conservado, para no comerse la primera silaba
-    thresholdFactor: 3.0  # cuanto debe superar el ruido de fondo para contar como voz
+  device: ''        # nombre exacto del microfono; vacio = el del sistema
+  gainDb: 0         # ganancia fija en dB (micros lejanos flojos)
+  normalize: false  # normalizacion dinamica (dynaudnorm)
 
 stt:
-  motor: whisper.cpp
-  modelo: small           # base | small | medium — small es el minimo decente en espanol
-  idioma: es              # 'auto' para detectar
+  model: small      # base | small | medium (small es el minimo decente en espanol)
+  language: es      # 'auto' para detectar
 
 # Cerebro. Patron Hermes/OpenClaw: registro de proveedores compatibles con la
-# API de OpenAI + una referencia por defecto en formato proveedor/modelo.
-# UN solo cliente sirve para todos; solo cambian base_url, clave y modelo.
-# (De momento el codigo usa DEFAULT_BRAIN_CONFIG en brain/config.ts; este
-#  bloque documenta la forma para cuando exista el cargador de YAML.)
-cerebro:
-  modelo: ollama/gemma4:12b   # el unico modelo presente en la maquina
-  # Razonamiento: 'none' con modelos "thinking" (gemma4) para no perder
-  # segundos ni tokens razonando antes de responder. Clave para la voz.
-  razonamiento: none          # none | low | medium | high
-  proveedores:
+# API de OpenAI + referencia por defecto en formato proveedor/modelo. Un solo
+# cliente sirve para todos; solo cambian baseUrl, clave y modelo.
+brain:
+  model: ollama/gemma4:12b   # el modelo local presente en la maquina
+  providers:
     ollama:
-      base_url: http://127.0.0.1:11434/v1
-      api_key: ollama         # Ollama la ignora, pero el cliente la exige
-      local: true             # disponible en modo confidencial
-      # gemma4:31b-cloud corre en la nube de Ollama (los datos salen), pese a
-      # acceder por el endpoint local. El menu del avatar lo marca como nube.
-      modelos: [gemma4:12b, ornith:9b, gemma4:31b-cloud]
+      baseUrl: http://127.0.0.1:11434/v1
+      apiKey: ollama         # Ollama la ignora, pero el cliente la exige
+      local: true
+      models: [gemma4:12b, ornith:9b, gemma4:31b-cloud]
+      # gemma4:31b-cloud corre en la nube de Ollama (los datos salen) pese a
+      # acceder por el endpoint local: el confidencial lo bloquea (resolveModel).
+      cloudModels: [gemma4:31b-cloud]
     anthropic:
-      base_url: https://api.anthropic.com/v1
-      api_key_env: ANTHROPIC_API_KEY   # nunca el secreto en el fichero
+      baseUrl: https://api.anthropic.com/v1
+      apiKeyEnv: ANTHROPIC_API_KEY   # nunca el secreto en el fichero
       local: false
-      modelos: [claude-sonnet-5, claude-opus-4-8]
+      models: [claude-sonnet-5, claude-opus-4-8]
     openai:
-      base_url: https://api.openai.com/v1
-      api_key_env: OPENAI_API_KEY
+      baseUrl: https://api.openai.com/v1
+      apiKeyEnv: OPENAI_API_KEY
       local: false
     gemini:
-      base_url: https://generativelanguage.googleapis.com/v1beta/openai
-      api_key_env: GEMINI_API_KEY
+      baseUrl: https://generativelanguage.googleapis.com/v1beta/openai
+      apiKeyEnv: GEMINI_API_KEY
       local: false
 
 tts:
-  motor: edge             # edge (neuronal, online) | sapi (local Windows)
-  voz: es-ES-AlvaroNeural
-  local:
-    # El motor local es SAPI (voces del sistema Windows), no Piper: Piper saca
-    # sus voces de HuggingFace, bloqueado en esta red. En modo confidencial se
-    # usa este.
-    motor: sapi
-    voz: Microsoft Helena Desktop
-
-# Cuatro agentes seleccionables; el avatar es un recurso, no codigo.
-agente: unit-a            # vulpis | unit-a | nexus | synapse
+  engine: edge                     # edge (neuronal, online) | sapi (local Windows)
+  edgeVoice: es-ES-AlvaroNeural
+  # Local es SAPI (voces de Windows), no Piper: Piper saca sus voces de
+  # HuggingFace, bloqueado en esta red. En modo confidencial se usa este.
+  sapiVoice: Microsoft Helena Desktop
