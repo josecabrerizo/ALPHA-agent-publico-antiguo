@@ -1,13 +1,28 @@
 import net from 'node:net';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 
 /**
  * Cliente del puente con el motor. Se conecta al socket TCP local que abre el
  * motor y recibe estado y texto, un JSON por linea. Reconecta solo, asi que da
  * igual quien arranque antes y sobrevive a que el motor se reinicie.
+ *
+ * El motor exige un token de sesion: se lee del fichero que deja y se manda como
+ * handshake al conectar. Sin token valido, el motor ignora todo.
  */
 
 // Debe coincidir con AVATAR_BRIDGE_PORT del motor.
 const PORT = 43117;
+// dist/bridge-client.js -> repoRoot: tres niveles arriba.
+const tokenPath = path.resolve(__dirname, '..', '..', '..', 'config', 'alpha.bridge-token');
+
+function readToken(): string {
+  try {
+    return readFileSync(tokenPath, 'utf8').trim();
+  } catch {
+    return '';
+  }
+}
 
 export type BridgeMessage =
   | { type: 'state'; state: 'reposo' | 'escuchando' | 'pensando' | 'hablando' }
@@ -45,6 +60,13 @@ export function connectBridge(onMessage: (msg: BridgeMessage) => void): BridgeHa
     if (closed) return;
     const s = net.connect(PORT, '127.0.0.1');
     socket = s;
+
+    // Handshake: el token se relee en cada conexion porque el motor genera uno
+    // nuevo en cada arranque.
+    s.on('connect', () => {
+      const token = readToken();
+      if (token) s.write(JSON.stringify({ type: 'auth', token }) + '\n');
+    });
 
     s.on('data', (chunk: Buffer) => {
       buffer += chunk.toString('utf8');
