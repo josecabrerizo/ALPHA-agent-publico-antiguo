@@ -53,6 +53,7 @@ export function saveSettings(settings: Settings): void {
 /** Modelos ofrecidos en el menu. Reflejan los proveedores del cerebro. */
 export const MODEL_OPTIONS: { ref: string; label: string; local: boolean }[] = [
   { ref: 'ollama/gemma4:12b', label: 'Gemma 4 12B (local)', local: true },
+  { ref: 'ollama/ornith:9b', label: 'Ornith 9B (local)', local: true },
   // Corre en la nube de Ollama pese a acceder por el endpoint local: no es
   // local a efectos de privacidad, el modo confidencial lo bloquea.
   { ref: 'ollama/gemma4:31b-cloud', label: 'Gemma 4 31B (Ollama cloud)', local: false },

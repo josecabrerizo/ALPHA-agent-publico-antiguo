@@ -25,7 +25,7 @@ export const DEFAULT_BRAIN_CONFIG: BrainConfig = {
       // el endpoint local. El registro es local a nivel de proveedor, asi que
       // el modo confidencial no lo bloquea por si solo; el menu del avatar si
       // lo marca como nube. Convendria un flag por-modelo en el futuro.
-      models: ['gemma4:12b', 'gemma4:31b-cloud'],
+      models: ['gemma4:12b', 'ornith:9b', 'gemma4:31b-cloud'],
     },
     anthropic: {
       baseUrl: 'https://api.anthropic.com/v1',
