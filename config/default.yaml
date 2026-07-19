@@ -1,4 +1,10 @@
 # Configuracion por defecto de A.L.P.H.A.
+#
+# AVISO: este fichero DOCUMENTA la forma prevista, pero el codigo AUN NO lo
+# consume: el motor usa sus defaults en TS (brain/config.ts, tts/types.ts...) y
+# la UI los suyos (ui-avatar/settings.ts). Pendiente: un unico esquema versionado
+# con cargador central. Hasta entonces, cambiar los valores aqui no tiene efecto.
+#
 # Para ajustes locales sin tocar git: copiar a config/local.yaml (ignorado).
 
 # Modo confidencial: desactiva TODA salida a la nube durante la sesion.
@@ -53,12 +59,14 @@ cerebro:
       local: false
 
 tts:
-  motor: msedge-tts       # requiere red; en modo confidencial se cae a piper
+  motor: edge             # edge (neuronal, online) | sapi (local Windows)
   voz: es-ES-AlvaroNeural
   local:
-    motor: piper
-    voz: es_ES-sharvard-medium
+    # El motor local es SAPI (voces del sistema Windows), no Piper: Piper saca
+    # sus voces de HuggingFace, bloqueado en esta red. En modo confidencial se
+    # usa este.
+    motor: sapi
+    voz: Microsoft Helena Desktop
 
 # Cuatro agentes seleccionables; el avatar es un recurso, no codigo.
-# Ver packages/ui-avatar cuando exista.
-agente: vulpis            # vulpis | unit-a | nexus | synapse
+agente: unit-a            # vulpis | unit-a | nexus | synapse

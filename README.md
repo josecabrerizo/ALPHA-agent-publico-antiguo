@@ -11,8 +11,8 @@ Windows y Linux. Todo Node/TypeScript, sin Python.
 
 ## Estado
 
-MVP 1 en construcción: *Clippy conversacional*. Hoy funciona el primer eslabón,
-la cadena **audio→texto**. Lo demás (cerebro, voz, visión, avatar) viene detrás.
+MVP conversacional **funcionando de punta a punta**: hablas o escribes al avatar,
+A.L.P.H.A. piensa (con herramientas y skills) y responde con voz. Falta la visión.
 
 | Capa | Estado |
 |---|---|
@@ -20,11 +20,17 @@ la cadena **audio→texto**. Lo demás (cerebro, voz, visión, avatar) viene det
 | Captura del audio del sistema (WASAPI loopback) | ✅ |
 | VAD por energía | ✅ |
 | STT (whisper.cpp) | ✅ |
-| Cerebro LLM (Ollama + nube) | ✅ |
+| Cerebro LLM (compatible-OpenAI: Ollama + nube) | ✅ |
 | Voz (msedge-tts online / SAPI local) | ✅ |
+| Avatar flotante (NodeGui) + menú de configuración | ✅ |
+| Puente motor↔avatar (TCP local con token) | ✅ |
+| Bucle completo escuchar→pensar→hablar | ✅ |
+| Chat escrito | ✅ |
+| Herramientas (tool-calling) | ✅ |
+| Skills (estándar SKILL.md, el agente las crea) | ✅ |
 | Visión de pantalla | ⬜ |
-| Avatar flotante (NodeGui) | ✅ |
-| Bucle completo escuchar→pensar→hablar | ⬜ |
+
+Ejecuta todo con `npm run spike:conversar` (motor) y `npm run avatar` (cara).
 
 ## Requisitos
 
@@ -150,12 +156,17 @@ packages/
     audio/     captura (ffmpeg) + VAD
     stt/       transcripción (whisper.cpp)
     spikes/    guiones ejecutables para validar cada capa por separado
-  ui-avatar/   (pendiente) App NodeGui: ventana flotante + avatar animado
+    brain/     cerebro compatible-OpenAI + herramientas + skills
+    conversation/  bucle escuchar→pensar→hablar + puente con el avatar
+    tts/       voz (Edge online / SAPI local)
+  ui-avatar/   App NodeGui: orbe flotante, menú de configuración y chat escrito
 ```
 
-El motor no sabe que existe una UI: expondrá un servidor WebSocket local y la
-app del avatar será un cliente delgado. Esto no es ceremonia — es lo que permite
-cambiar NodeGui por otra capa de presentación sin reescribir el cerebro.
+El motor no sabe que existe una UI: expone un **puente TCP local** (127.0.0.1,
+con token de sesión) y la app del avatar es un cliente delgado. Esto no es
+ceremonia — es lo que permite cambiar NodeGui por otra capa de presentación sin
+reescribir el cerebro. El avatar es el panel de control: lo que se configura en
+su menú (agente, modelo, sonido, privacidad) viaja al motor por ese puente.
 
 ### Por qué procesos externos y (casi) ningún módulo nativo
 
@@ -181,9 +192,12 @@ entrega 48 kHz estéreo; se remuestrea a 16 kHz mono con ffmpeg leyendo por
 stdin, así `captureSystemAudio` tiene la **misma interfaz** que `captureMicrophone`
 y el VAD y whisper no distinguen el origen.
 
-> Nota: `npm audit` marca 3 vulnerabilidades altas en `node-tar`, una dependencia
-> de **instalación** de audify (descomprime el prebuild). No va en el código que
-> se ejecuta en runtime.
+> Nota de seguridad: `npm audit` reporta varias vulnerabilidades (a día de hoy
+> ~5 altas y 2 moderadas), concentradas en dependencias de **instalación y
+> tooling** de los módulos nativos —`tar`, `cmake-js`, NodeGui, audify—, no en el
+> código que se ejecuta en runtime. **No** ejecutar `npm audit fix --force`: la
+> corrección que propone para NodeGui implica un cambio mayor/downgrade. Revisar
+> actualizaciones compatibles a mano.
 
 ## Los cuatro agentes
 

@@ -22,6 +22,7 @@
     "devices": "npm run devices --workspace @alpha/engine",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "tsc --build",
+    "check": "tsc --build && npm run test --workspaces --if-present",
     "mic-check": "npm run mic-check --workspace @alpha/engine",
     "spike:tts": "npm run spike:tts --workspace @alpha/engine --",
     "spike:conversar": "npm run spike:conversar --workspace @alpha/engine",

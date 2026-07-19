@@ -13,6 +13,7 @@ export class SpeechQueue {
   constructor(
     private readonly speaker: Speaker,
     private readonly onFirst?: () => void,
+    private readonly onError?: (error: Error) => void,
   ) {}
 
   enqueue(text: string): void {
@@ -24,8 +25,9 @@ export class SpeechQueue {
     }
     this.chain = this.chain
       .then(() => this.speaker.speak(clean))
-      // Un fallo al decir una frase no debe romper el resto de la cola.
-      .catch(() => {});
+      // Un fallo al decir una frase no debe romper el resto de la cola, pero se
+      // reporta (antes se tragaba en silencio y ocultaba fallos de voz).
+      .catch((error: Error) => this.onError?.(error));
   }
 
   /** Espera a que termine de sonar todo lo encolado. */

@@ -233,7 +233,11 @@ export class ConversationSession {
       this.cb.onState?.('pensando');
       this.cb.onLog?.('consultando al cerebro…');
       const tBrain = performance.now();
-      const queue = new SpeechQueue(this.speaker, () => this.cb.onState?.('hablando'));
+      const queue = new SpeechQueue(
+        this.speaker,
+        () => this.cb.onState?.('hablando'),
+        (error) => this.cb.onError?.('tts', error),
+      );
       let full = '';
       let buffer = '';
       let firstToken = false;
