@@ -225,23 +225,24 @@ function sendAvatars(): void {
 // Voces disponibles en el sistema (SAPI locales + Edge en la nube).
 // Se calcula una sola vez al arrancar.
 let availableVoices: Awaited<ReturnType<typeof getAvailableVoices>> = [];
-(async () => {
-  try {
-    availableVoices = await getAvailableVoices();
-    log(`voces disponibles: ${availableVoices.length} (${availableVoices.filter((v) => v.local).length} locales)`);
-  } catch {
+const voicesReady = getAvailableVoices()
+  .then((v) => {
+    availableVoices = v;
+    log(`voces disponibles: ${v.length} (${v.filter((vo) => vo.local).length} locales)`);
+  })
+  .catch(() => {
     log(`no se pudieron enumerar las voces disponibles`);
-  }
-})();
+  });
 
-function sendVoices(): void {
+async function sendVoices(): Promise<void> {
+  await voicesReady; // esperar a que se carguen
   bridge.broadcast({ type: 'voices', list: availableVoices });
 }
 
-bridge.onClientConnect(() => {
+bridge.onClientConnect(async () => {
   void sendDevices();
   sendAvatars();
-  sendVoices();
+  await sendVoices();
 });
 void sendDevices();
 
