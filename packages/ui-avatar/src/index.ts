@@ -7,16 +7,7 @@
  */
 import { AvatarWindow } from './avatar-window.js';
 import { connectBridge } from './bridge-client.js';
-
-/** Log con marca de tiempo, como en el motor, para que la consola informe. */
-function stamp(): string {
-  const d = new Date();
-  const p = (n: number, w = 2) => String(n).padStart(w, '0');
-  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
-}
-function log(message: string): void {
-  console.log(`[${stamp()}] ${message}`);
-}
+import { log } from './log.js';
 
 const avatar = new AvatarWindow();
 avatar.show();
@@ -39,6 +30,10 @@ const bridge = connectBridge((msg) => {
   } else if (msg.type === 'devices') {
     avatar.setMicDevices(msg.inputs);
     log(`motor conectado · ${msg.inputs.length} micrófonos disponibles`);
+  } else if (msg.type === 'avatars') {
+    avatar.setAvatarOptions(msg.list, msg.current);
+    const nombres = msg.list.map((a) => `${a.name}${a.local ? '' : ' (nube)'}`).join(', ');
+    log(`avatares: ${nombres || '(ninguno)'} · activo: ${msg.current ?? '(ninguno)'}`);
   }
 });
 (globalThis as Record<string, unknown>)['__alphaBridge'] = bridge;

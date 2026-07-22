@@ -22,6 +22,12 @@ export interface TtsConfig {
   edgeVoice: string;
   /** Voz del motor sapi (nombre SAPI, p. ej. "Microsoft Helena Desktop"). */
   sapiVoice: string;
+  /**
+   * Ajuste de ritmo, -10..10 (0 = normal). Es lo que distingue a los avatares
+   * locales entre si: en esta maquina solo hay UNA voz SAPI en espanol, asi que
+   * el caracter se da con el ritmo, no con la voz.
+   */
+  rate: number;
   /** Si true, se ignora `engine` y se usa siempre el local (sapi). */
   confidential: boolean;
 }
@@ -30,5 +36,6 @@ export const DEFAULT_TTS_CONFIG: TtsConfig = {
   engine: 'edge',
   edgeVoice: 'es-ES-AlvaroNeural',
   sapiVoice: 'Microsoft Helena Desktop',
+  rate: 0,
   confidential: false,
 };

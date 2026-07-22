@@ -9,5 +9,7 @@ import { SapiSpeaker } from './sapi-speaker.js';
 export function createSpeaker(config: Partial<TtsConfig> = {}): Speaker {
   const cfg = { ...DEFAULT_TTS_CONFIG, ...config };
   const engine = cfg.confidential ? 'sapi' : cfg.engine;
-  return engine === 'sapi' ? new SapiSpeaker(cfg.sapiVoice) : new EdgeSpeaker(cfg.edgeVoice);
+  return engine === 'sapi'
+    ? new SapiSpeaker(cfg.sapiVoice, cfg.rate)
+    : new EdgeSpeaker(cfg.edgeVoice, cfg.rate);
 }

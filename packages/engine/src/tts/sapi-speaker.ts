@@ -13,7 +13,11 @@ import type { Speaker } from './types.js';
 export class SapiSpeaker implements Speaker {
   private proc: ChildProcess | undefined;
 
-  constructor(private readonly voice: string) {}
+  /** `rate` en el rango de SAPI (-10..10); 0 es el ritmo normal. */
+  constructor(
+    private readonly voice: string,
+    private readonly rate = 0,
+  ) {}
 
   describe(): ReturnType<Speaker['describe']> {
     return { engine: 'sapi', voice: this.voice, local: true };
@@ -31,6 +35,8 @@ export class SapiSpeaker implements Speaker {
       '$s = New-Object System.Speech.Synthesis.SpeechSynthesizer',
       // La voz viene por entorno; si no existe, SelectVoice lanza y usamos la de por defecto.
       'try { $s.SelectVoice($env:ALPHA_SAPI_VOICE) } catch {}',
+      // El ritmo da caracter cuando todos los avatares locales comparten voz.
+      'try { $s.Rate = [int]$env:ALPHA_SAPI_RATE } catch {}',
       '$text = [Console]::In.ReadToEnd()',
       '$s.Speak($text)',
       '$s.Dispose()',
@@ -39,7 +45,14 @@ export class SapiSpeaker implements Speaker {
     const ps = spawn(
       'powershell',
       ['-NoProfile', '-NonInteractive', '-Command', script],
-      { stdio: ['pipe', 'ignore', 'ignore'], env: { ...process.env, ALPHA_SAPI_VOICE: this.voice } },
+      {
+        stdio: ['pipe', 'ignore', 'ignore'],
+        env: {
+          ...process.env,
+          ALPHA_SAPI_VOICE: this.voice,
+          ALPHA_SAPI_RATE: String(Math.max(-10, Math.min(10, Math.round(this.rate)))),
+        },
+      },
     );
     this.proc = ps;
 

@@ -24,11 +24,23 @@ function readToken(): string {
   }
 }
 
+/** Perfil de avatar tal como lo manda el motor (el dueno de los perfiles). */
+export interface AvatarOption {
+  id: string;
+  name: string;
+  role: string;
+  /** Privacidad: solo recursos locales. En confidencial solo se ofrecen estos. */
+  local: boolean;
+  /** Ruta absoluta de la imagen. */
+  image: string;
+}
+
 export type BridgeMessage =
   | { type: 'state'; state: 'reposo' | 'escuchando' | 'pensando' | 'hablando' }
   | { type: 'user'; text: string }
   | { type: 'assistant'; text: string }
-  | { type: 'devices'; inputs: { name: string; isDefault: boolean }[]; current?: string };
+  | { type: 'devices'; inputs: { name: string; isDefault: boolean }[]; current?: string }
+  | { type: 'avatars'; list: AvatarOption[]; current?: string };
 
 /** Avatar -> motor: la config elegida en el menu. */
 export interface ConfigMessage {

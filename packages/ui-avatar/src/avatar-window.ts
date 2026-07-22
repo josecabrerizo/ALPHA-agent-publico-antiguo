@@ -6,21 +6,37 @@ import {
   QMenu,
   QAction,
   QPoint,
+  QPixmap,
   QMouseEvent,
   WidgetAttribute,
   WindowType,
   WidgetEventTypes,
   MouseButton,
   TextFormat,
+  AspectRatioMode,
+  TransformationMode,
 } from '@nodegui/nodegui';
+import path from 'node:path';
+import type { AvatarOption } from './bridge-client.js';
+import { log } from './log.js';
 import { STATE_RHYTHMS, STATE_CYCLE, MAX_PULSE, type AvatarState } from './states.js';
 import { AGENTS, AGENT_ORDER, type AgentId } from './agents.js';
 import { loadSettings, saveSettings, MODEL_OPTIONS, type Settings } from './settings.js';
 
 const WIN_W = 280;
+// Zona visual del avatar: la ocupa el retrato del personaje o, si no hay imagen,
+// el orbe. Alto fijo para los dos, asi el resto del layout no baila.
+const VISUAL_TOP = 10;
+const VISUAL_H = 200;
+const VISUAL_BOTTOM = VISUAL_TOP + VISUAL_H;
 const ORB_CX = WIN_W / 2;
-const ORB_CY = 92; // centro vertical del orbe, en la zona alta
+const ORB_CY = VISUAL_TOP + VISUAL_H / 2;
 const BASE_RADIUS = 62;
+/** Caja donde se encaja el retrato, conservando su proporcion. */
+const PORTRAIT_MAX_W = 168;
+const PORTRAIT_MAX_H = VISUAL_H;
+/** Amplitud de la respiracion del retrato: mucho mas sutil que la del orbe. */
+const PORTRAIT_BREATH = 250;
 const CAPTION_MS = 9000; // cuanto se queda el ultimo texto antes de esfumarse
 
 const PAD = 12; // margen lateral
@@ -45,9 +61,8 @@ const CIRCLE_RADIUS = BASE_RADIUS + MAX_PULSE;
 // Layout con dos alturas: compacta (orbe + campo de texto pegado debajo) y
 // expandida (aparece el bocadillo en medio y el campo baja). Asi en reposo el
 // chat no queda separado del orbe por un hueco vacio.
-const ORB_BOTTOM = ORB_CY + CIRCLE_RADIUS;
-const CAPTION_Y = ORB_BOTTOM + GAP;
-const INPUT_Y_COMPACT = ORB_BOTTOM + GAP;
+const CAPTION_Y = VISUAL_BOTTOM + GAP;
+const INPUT_Y_COMPACT = VISUAL_BOTTOM + GAP;
 const INPUT_Y_EXPANDED = CAPTION_Y + CAPTION_H + GAP;
 const WIN_H_COMPACT = INPUT_Y_COMPACT + INPUT_H + PAD;
 const WIN_H_EXPANDED = INPUT_Y_EXPANDED + INPUT_H + PAD;
@@ -61,8 +76,15 @@ export class AvatarWindow {
   private readonly win = new QMainWindow();
   private readonly root = new QWidget();
   private readonly orb = new QWidget();
+  /** Retrato del personaje. Va despues del orbe para quedar por encima de el. */
+  private readonly portrait = new QLabel();
   private readonly caption = new QLabel();
   private readonly input = new QLineEdit();
+
+  /** Tamano base del retrato ya encajado; undefined = no hay imagen que pintar. */
+  private portraitBase: { w: number; h: number } | undefined;
+  /** Perfiles que manda el motor: el es el dueno de los avatares. */
+  private avatars: AvatarOption[] = [];
 
   /** Se llama al enviar un mensaje escrito (Enter en el campo de texto). */
   private onTextSubmit: ((text: string) => void) | undefined;
@@ -91,9 +113,11 @@ export class AvatarWindow {
   constructor() {
     this.setupWindow();
     this.setupOrb();
+    this.setupPortrait();
     this.setupCaption();
     this.setupInput();
     this.setupMouse();
+    this.applyPortrait();
     this.startBreathing();
   }
 
@@ -123,6 +147,21 @@ export class AvatarWindow {
   /** Recibe del motor la lista de microfonos disponibles. */
   setMicDevices(inputs: { name: string; isDefault: boolean }[]): void {
     this.micDevices = inputs;
+  }
+
+  /**
+   * Recibe del motor los perfiles de avatar y cual quedo activo. El motor es
+   * quien manda: si rechazo un cambio (p. ej. un avatar de nube en modo
+   * confidencial), `current` trae el que de verdad esta puesto y la UI se
+   * alinea con el en vez de mentir sobre lo que hay corriendo.
+   */
+  setAvatarOptions(list: AvatarOption[], current?: string): void {
+    this.avatars = list;
+    if (current && current !== this.settings.agent && AGENT_ORDER.includes(current as AgentId)) {
+      this.settings = { ...this.settings, agent: current as AgentId };
+      saveSettings(this.settings);
+    }
+    this.applyPortrait();
   }
 
   /** Muestra texto en el bocadillo (la ventana se expande) y se esfuma sola. */
@@ -168,6 +207,58 @@ export class AvatarWindow {
     this.paintOrb();
   }
 
+  /**
+   * Retrato del avatar. Se queda oculto hasta que el motor manda los perfiles
+   * con su imagen; sin imagen, el orbe sigue siendo la cara del asistente.
+   */
+  private setupPortrait(): void {
+    this.portrait.setParent(this.root);
+    this.portrait.setInlineStyle('background: transparent;');
+    // La imagen se estira al tamano de la etiqueta; como la respiracion escala
+    // ancho y alto por el mismo factor, la proporcion no se deforma.
+    this.portrait.setScaledContents(true);
+    this.portrait.hide();
+  }
+
+  /**
+   * Imagen del avatar. Manda la que da el motor (el perfil puede apuntar a
+   * cualquier fichero), pero antes de que conecte se usa la ruta convencional
+   * del repo para que el personaje se vea desde el primer segundo.
+   */
+  private imageFor(id: string): string {
+    const fromEngine = this.avatars.find((a) => a.id === id)?.image;
+    if (fromEngine) return fromEngine;
+    // dist/avatar-window.js -> repoRoot: tres niveles arriba (como el token).
+    return path.resolve(__dirname, '..', '..', '..', 'assets', 'avatars', `${id}.png`);
+  }
+
+  /**
+   * Carga la imagen del avatar activo. Si no hay perfil, imagen o el fichero no
+   * se puede leer, se vuelve al orbe: la ventana nunca se queda en blanco.
+   */
+  private applyPortrait(): void {
+    const file = this.imageFor(this.settings.agent);
+    const pixmap = new QPixmap();
+    if (!file || !pixmap.load(file)) {
+      this.portraitBase = undefined;
+      this.portrait.hide();
+      this.paintOrb();
+      log(`retrato de "${this.settings.agent}" no disponible (${file || 'sin ruta'}); se usa el orbe`);
+      return;
+    }
+    const scaled = pixmap.scaled(
+      PORTRAIT_MAX_W,
+      PORTRAIT_MAX_H,
+      AspectRatioMode.KeepAspectRatio,
+      TransformationMode.SmoothTransformation,
+    );
+    this.portraitBase = { w: scaled.width(), h: scaled.height() };
+    this.portrait.setPixmap(scaled);
+    this.portrait.show();
+    this.paintOrb();
+    log(`retrato: ${this.settings.agent} (${scaled.width()}×${scaled.height()})`);
+  }
+
   /** Bocadillo de texto bajo el orbe. Oculto hasta que llega algo que decir. */
   private setupCaption(): void {
     this.caption.setParent(this.root);
@@ -207,11 +298,26 @@ export class AvatarWindow {
     });
   }
 
-  /** Estilo del orbe: color del agente activo, degradado radial y halo. */
+  /**
+   * Estilo del orbe con el color del agente activo. Con retrato pasa a ser un
+   * halo tenue detras del personaje; sin el, es la cara del asistente.
+   */
   private paintOrb(): void {
     const [r, g, b] = AGENTS[this.settings.agent].color;
     const lighten = (c: number) => Math.min(255, c + 45);
     const darken = (c: number) => Math.round(c * 0.5);
+    if (this.portraitBase) {
+      this.orb.setInlineStyle(`
+        background: qradialgradient(
+          cx: 0.5, cy: 0.5, radius: 0.5, fx: 0.5, fy: 0.5,
+          stop: 0 rgba(${lighten(r)}, ${lighten(g)}, ${lighten(b)}, 110),
+          stop: 0.6 rgba(${r}, ${g}, ${b}, 55),
+          stop: 1 rgba(${darken(r)}, ${darken(g)}, ${darken(b)}, 0)
+        );
+        border-radius: ${CIRCLE_RADIUS}px;
+      `);
+      return;
+    }
     this.orb.setInlineStyle(`
       background: qradialgradient(
         cx: 0.5, cy: 0.42, radius: 0.75,
@@ -260,7 +366,8 @@ export class AvatarWindow {
   private update(patch: Partial<Settings>): void {
     this.settings = { ...this.settings, ...patch };
     saveSettings(this.settings);
-    this.paintOrb();
+    // applyPortrait repinta tambien el orbe/halo, asi que cubre los dos casos.
+    this.applyPortrait();
     this.onSettingsChanged?.(this.settings);
   }
 
@@ -283,18 +390,25 @@ export class AvatarWindow {
     this.menu = menu;
     this.menuRefs = [menu];
 
-    const title = this.action(`A.L.P.H.A. — ${AGENTS[this.settings.agent].label}`, () => {}, { enabled: false });
+    const active = this.avatars.find((a) => a.id === this.settings.agent);
+    const title = this.action(`A.L.P.H.A. — ${active?.name ?? AGENTS[this.settings.agent].label}`, () => {}, {
+      enabled: false,
+    });
     menu.addAction(title);
     menu.addSeparator();
 
-    // Avatar
+    // Avatar. Los perfiles los manda el motor (personalidad, voz, modelo e
+    // imagen viven ahi); si aun no ha conectado, se cae a la lista local.
     const avatarMenu = addSubmenu(menu, 'Avatar');
     this.menuRefs.push(avatarMenu);
-    for (const id of AGENT_ORDER) {
-      const agent = AGENTS[id];
+    for (const opt of this.avatarChoices()) {
+      // En modo confidencial solo se ofrecen los avatares que trabajan en local.
+      const blocked = this.settings.confidential && !opt.local;
+      const label = `${opt.name} — ${opt.role}${opt.local ? '' : '  (nube)'}`;
       avatarMenu.addAction(
-        this.action(`${agent.label} — ${agent.tagline}`, () => this.update({ agent: id }), {
-          checked: this.settings.agent === id,
+        this.action(label, () => this.update({ agent: opt.id as AgentId }), {
+          checked: this.settings.agent === opt.id,
+          enabled: !blocked,
         }),
       );
     }
@@ -348,6 +462,22 @@ export class AvatarWindow {
     menu.exec(new QPoint(x, y));
   }
 
+  /**
+   * Avatares que se pueden elegir. Mientras el motor no conecte no hay perfiles,
+   * asi que se muestra la lista local (sin imagen ni privacidad real, pero el
+   * menu no se queda vacio).
+   */
+  private avatarChoices(): AvatarOption[] {
+    if (this.avatars.length > 0) return this.avatars;
+    return AGENT_ORDER.map((id) => ({
+      id,
+      name: AGENTS[id].label,
+      role: AGENTS[id].tagline,
+      local: true,
+      image: '',
+    }));
+  }
+
   private toggleConfidential(): void {
     const confidential = !this.settings.confidential;
     // Al activar confidencial con un modelo de nube seleccionado, se cae al
@@ -357,7 +487,14 @@ export class AvatarWindow {
       confidential && current && !current.local
         ? (MODEL_OPTIONS.find((m) => m.local)?.ref ?? this.settings.model)
         : this.settings.model;
-    this.update({ confidential, model });
+    // Lo mismo con el avatar: uno de nube no puede seguir puesto en modo
+    // confidencial, asi que se propone el primero que trabaje solo en local.
+    const avatar = this.avatars.find((a) => a.id === this.settings.agent);
+    const agent =
+      confidential && avatar && !avatar.local
+        ? ((this.avatars.find((a) => a.local)?.id as AgentId | undefined) ?? this.settings.agent)
+        : this.settings.agent;
+    this.update({ confidential, model, agent });
   }
 
   /**
@@ -369,12 +506,26 @@ export class AvatarWindow {
     this.timer = setInterval(() => {
       const { breatheMs, pulse } = STATE_RHYTHMS[this.state];
       this.phase += (1000 / FPS / breatheMs) * 2 * Math.PI;
-      const radius = BASE_RADIUS + Math.sin(this.phase) * pulse;
+      const wave = Math.sin(this.phase);
+      const radius = BASE_RADIUS + wave * pulse;
       this.orb.setGeometry(
         Math.round(ORB_CX - radius),
         Math.round(ORB_CY - radius),
         Math.round(radius * 2),
         Math.round(radius * 2),
+      );
+      if (!this.portraitBase) return;
+      // El retrato respira anclado por abajo: crece hacia arriba, como quien
+      // toma aire, en vez de flotar. Asi el hueco con el bocadillo no cambia.
+      const { w, h } = this.portraitBase;
+      const scale = 1 + (wave * pulse) / PORTRAIT_BREATH;
+      const pw = Math.round(w * scale);
+      const ph = Math.round(h * scale);
+      this.portrait.setGeometry(
+        Math.round(ORB_CX - pw / 2),
+        Math.round(VISUAL_BOTTOM - ph),
+        pw,
+        ph,
       );
     }, 1000 / FPS);
   }

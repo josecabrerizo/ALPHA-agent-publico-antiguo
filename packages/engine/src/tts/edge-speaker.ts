@@ -11,7 +11,11 @@ import type { Speaker } from './types.js';
 export class EdgeSpeaker implements Speaker {
   private player: ChildProcess | undefined;
 
-  constructor(private readonly voice: string) {}
+  /** `rate` en la misma escala que SAPI (-10..10); se traduce a prosody. */
+  constructor(
+    private readonly voice: string,
+    private readonly rate = 0,
+  ) {}
 
   describe(): ReturnType<Speaker['describe']> {
     return { engine: 'edge', voice: this.voice, local: false };
@@ -31,7 +35,12 @@ export class EdgeSpeaker implements Speaker {
     );
     this.player = ffplay;
 
-    const { audioStream } = tts.toStream(clean);
+    // La escala -10..10 de SAPI se traduce a porcentaje de prosody, para que la
+    // configuracion del avatar signifique lo mismo en los dos motores.
+    const percent = Math.max(-100, Math.min(100, Math.round(this.rate * 10)));
+    const { audioStream } = tts.toStream(clean, {
+      rate: `${percent >= 0 ? '+' : ''}${percent}%`,
+    } as never);
 
     await new Promise<void>((resolve, reject) => {
       audioStream.on('data', (chunk: Buffer) => {

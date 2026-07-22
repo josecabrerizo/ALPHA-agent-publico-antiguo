@@ -18,6 +18,7 @@ import { createSpeaker } from '../tts/speaker.js';
 import { listInputDevices, defaultInputDevice } from '../audio/devices.js';
 import { toDbfs } from '../audio/format.js';
 import { loadConfig } from '../config/loader.js';
+import { loadAvatars, type AvatarProfile } from '../config/avatars.js';
 import { ConversationSession, type ConversationState } from '../conversation/session.js';
 import { AvatarBridge, AVATAR_BRIDGE_PORT } from '../conversation/avatar-bridge.js';
 
@@ -34,8 +35,19 @@ function log(message: string): void {
 // Config unificada: defaults ← default.yaml ← local.yaml ← ajustes del avatar.
 // El entorno solo sobreescribe para pruebas puntuales.
 const config = loadConfig();
-let model = process.env['ALPHA_MODEL'] ?? config.brain.model;
 let confidential = process.env['ALPHA_CONFIDENCIAL'] === '1' || config.confidential;
+
+// El avatar es un PERFIL: manda sobre modelo, voz y personalidad del asistente.
+const avatars = loadAvatars();
+const avatarById = (id: string): AvatarProfile | undefined => avatars.find((a) => a.id === id);
+let avatar = avatarById(config.agent);
+// En confidencial solo valen los avatares locales; si el guardado no lo es, se
+// cae al primero que si lo sea (el motor lo exige, no solo el menu).
+if (confidential && avatar && !avatar.local) {
+  const fallback = avatars.find((a) => a.local);
+  if (fallback) avatar = fallback;
+}
+let model = process.env['ALPHA_MODEL'] ?? avatar?.model ?? config.brain.model;
 
 const captureOptions = {
   device: process.env['ALPHA_AUDIO_DEVICE'] ?? config.audio.device,
@@ -53,27 +65,37 @@ const tools = new ToolRegistry().registerAll(BUILTIN_TOOLS).registerAll(skills.t
 // Toman los valores por parametro (no del cierre) para poder construir y
 // validar candidatos ANTES de comprometer el estado — reconfiguracion
 // transaccional. brain y tts salen de la config unificada.
-const makeBrain = (m: string, conf: boolean) =>
+/** La personalidad del avatar se inyecta en el prompt: es lo que le da caracter. */
+const systemPromptFor = (av: AvatarProfile | undefined): string =>
+  av?.personality
+    ? `${config.brain.systemPrompt}\n\nTe llamas ${av.name}. Tu personalidad: ${av.personality}`
+    : config.brain.systemPrompt;
+
+const makeBrain = (m: string, conf: boolean, av: AvatarProfile | undefined) =>
   new Brain({
     model: m,
-    config: { ...config.brain, confidential: conf },
+    config: { ...config.brain, systemPrompt: systemPromptFor(av), confidential: conf },
     tools,
     skillsPrompt: () => skills.promptSection(),
   });
-const makeSpeaker = (conf: boolean) =>
+const makeSpeaker = (conf: boolean, av: AvatarProfile | undefined) =>
   createSpeaker({
-    engine: (process.env['ALPHA_TTS_ENGINE'] as 'edge' | 'sapi') ?? config.tts.engine,
-    edgeVoice: config.tts.edgeVoice,
-    sapiVoice: config.tts.sapiVoice,
+    engine: (process.env['ALPHA_TTS_ENGINE'] as 'edge' | 'sapi') ?? av?.voice.engine ?? config.tts.engine,
+    edgeVoice: av?.voice.engine === 'edge' ? av.voice.name : config.tts.edgeVoice,
+    sapiVoice: av?.voice.engine === 'sapi' ? av.voice.name : config.tts.sapiVoice,
+    rate: av?.voice.rate ?? config.tts.rate,
     confidential: conf,
   });
 
-let brain = makeBrain(model, confidential);
-let speaker = makeSpeaker(confidential);
+let brain = makeBrain(model, confidential, avatar);
+let speaker = makeSpeaker(confidential, avatar);
 
 const brainInfo = brain.describe();
 const voiceInfo = speaker.describe();
 console.log(`\n  A.L.P.H.A. — conversacion completa`);
+console.log(
+  `  Avatar:    ${avatar ? `${avatar.name} — ${avatar.role} ${avatar.local ? '(solo local)' : '(usa nube)'}` : '(ninguno)'}`,
+);
 console.log(`  Microfono: ${captureOptions.device}${captureOptions.gainDb ? ` (+${captureOptions.gainDb} dB)` : ''}`);
 console.log(`  Cerebro:   ${brainInfo.provider}/${brainInfo.model} ${brainInfo.local ? '(local)' : '(nube)'}`);
 console.log(`  Voz:       ${voiceInfo.engine}/${voiceInfo.voice} ${voiceInfo.local ? '(local)' : '(nube)'}`);
@@ -153,7 +175,25 @@ async function sendDevices(): Promise<void> {
     log(`✗ [devices] ${(err as Error).message}`);
   }
 }
-bridge.onClientConnect(() => void sendDevices());
+// Los perfiles de avatar los tiene el motor (los lee de config/avatars.yaml);
+// la UI solo los pinta, igual que con los microfonos.
+function sendAvatars(): void {
+  bridge.broadcast({
+    type: 'avatars',
+    list: avatars.map((a) => ({
+      id: a.id,
+      name: a.name,
+      role: a.role,
+      local: a.local,
+      image: a.image,
+    })),
+    ...(avatar ? { current: avatar.id } : {}),
+  });
+}
+bridge.onClientConnect(() => {
+  void sendDevices();
+  sendAvatars();
+});
 void sendDevices();
 
 // Chat escrito desde el avatar: se responde como a la voz, mismo historial.
@@ -172,26 +212,62 @@ bridge.onConfigMessage((msg) => {
     log(`⚙️  microfono desde el avatar: ${s.audioDevice}`);
   }
 
-  // Cerebro y voz: recrear si cambia modelo o privacidad.
-  const nextModel = s.model && s.model !== model ? s.model : model;
   const nextConfidential = typeof s.confidential === 'boolean' ? s.confidential : confidential;
-  if (nextModel === model && nextConfidential === confidential) return;
+
+  // Cambio de AVATAR: su perfil manda sobre modelo, voz y personalidad.
+  let nextAvatar = avatar;
+  if (s.agent && s.agent !== avatar?.id) {
+    const candidate = avatarById(s.agent);
+    if (!candidate) {
+      log(`✗ [config] avatar desconocido: "${s.agent}"`);
+      return;
+    }
+    // Contrato de privacidad: en confidencial solo avatares locales.
+    if (nextConfidential && !candidate.local) {
+      log(`✗ [config] "${candidate.name}" usa la nube y el modo confidencial esta activo — no se aplica`);
+      return;
+    }
+    nextAvatar = candidate;
+  }
+
+  // Activar confidencial con un avatar de nube puesto: en vez de fallar entero
+  // (y quedarnos sin modo confidencial), se cae al primer avatar local.
+  if (nextConfidential && nextAvatar && !nextAvatar.local) {
+    const fallback = avatars.find((a) => a.local);
+    if (!fallback) {
+      log(`✗ [config] modo confidencial sin ningun avatar local disponible`);
+      return;
+    }
+    log(`⚙️  confidencial: "${nextAvatar.name}" usa la nube — se cambia a "${fallback.name}"`);
+    nextAvatar = fallback;
+  }
+
+  // Un avatar nuevo trae su modelo; si no, manda el que pidan explicitamente.
+  const nextModel =
+    nextAvatar !== avatar ? nextAvatar?.model ?? model : s.model && s.model !== model ? s.model : model;
+
+  if (nextAvatar === avatar && nextModel === model && nextConfidential === confidential) return;
 
   try {
     // Se construye y VALIDA el candidato antes de tocar nada: describe() llama a
     // resolveModel, que lanza si el modelo no cuadra (p. ej. nube en
     // confidencial, proveedor desconocido o clave ausente).
-    const nextBrain = makeBrain(nextModel, nextConfidential);
+    const nextBrain = makeBrain(nextModel, nextConfidential, nextAvatar);
     const info = nextBrain.describe();
-    const nextSpeaker = makeSpeaker(nextConfidential);
+    const nextSpeaker = makeSpeaker(nextConfidential, nextAvatar);
+    const voiceInfo = nextSpeaker.describe();
 
     // Solo ahora, con todo construido y validado, se compromete el estado.
     brain = nextBrain;
     speaker = nextSpeaker;
     model = nextModel;
     confidential = nextConfidential;
+    avatar = nextAvatar;
     session.reconfigure({ brain, speaker });
-    log(`⚙️  reconfigurado desde el avatar: ${info.provider}/${info.model}${confidential ? ' · confidencial' : ''}`);
+    sendAvatars(); // que la UI sepa cual quedo activo
+    log(
+      `⚙️  ${avatar ? `${avatar.name} · ` : ''}${info.provider}/${info.model} · voz ${voiceInfo.voice}${confidential ? ' · confidencial' : ''}`,
+    );
   } catch (err) {
     // Falla la validacion: se mantiene la config anterior intacta.
     log(`✗ [config] ${(err as Error).message} — se mantiene la configuracion anterior`);

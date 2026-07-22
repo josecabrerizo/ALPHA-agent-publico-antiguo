@@ -159,7 +159,8 @@ packages/
     brain/     cerebro compatible-OpenAI + herramientas + skills
     conversation/  bucle escuchar→pensar→hablar + puente con el avatar
     tts/       voz (Edge online / SAPI local)
-  ui-avatar/   App NodeGui: orbe flotante, menú de configuración y chat escrito
+    config/    esquema unificado + carga por capas + perfiles de avatar
+  ui-avatar/   App NodeGui: retrato flotante, menú de configuración y chat escrito
 ```
 
 El motor no sabe que existe una UI: expone un **puente TCP local** (127.0.0.1,
@@ -167,6 +168,12 @@ con token de sesión) y la app del avatar es un cliente delgado. Esto no es
 ceremonia — es lo que permite cambiar NodeGui por otra capa de presentación sin
 reescribir el cerebro. El avatar es el panel de control: lo que se configura en
 su menú (agente, modelo, sonido, privacidad) viaja al motor por ese puente.
+
+El puente va en los dos sentidos, y **manda el motor**: él es el dueño de los
+perfiles de avatar y de la lista de micrófonos, y los envía al conectar. Si
+rechaza un cambio —un avatar de nube con el modo confidencial puesto— responde
+con el que de verdad quedó activo, y la UI se alinea con él en vez de mentir
+sobre lo que está corriendo.
 
 ### Por qué procesos externos y (casi) ningún módulo nativo
 
@@ -199,17 +206,51 @@ y el VAD y whisper no distinguen el origen.
 > corrección que propone para NodeGui implica un cambio mayor/downgrade. Revisar
 > actualizaciones compatibles a mano.
 
+## Configuración
+
+Un solo esquema, tres capas que se funden en este orden (gana la última):
+
+```
+valores por defecto  →  config/default.yaml  →  config/local.yaml  →  config/alpha.settings.json
+        (código)            (versionado)          (tuyo, ignorado)      (lo que toca el avatar)
+```
+
+`config/local.yaml` es el sitio para lo tuyo: no va al repo.
+
 ## Los cuatro agentes
 
-El avatar no es un personaje cableado sino un recurso enchufable. Están
-definidos cuatro, cada uno con su carácter:
+El avatar no es un personaje cableado sino un **perfil** que reconfigura al
+asistente: al elegirlo cambian de golpe su nombre, personalidad, modelo, voz e
+imagen. Viven en `config/avatars.yaml`, así que se editan sin tocar código:
 
-| Agente | Avatar | Rol |
-|---|---|---|
-| **Vulpis.AI** | Zorro antropomórfico | El Explorador Proactivo |
-| **Unit-A** | Robot / droide | El Asistente Cibernético |
-| **Nexus** | Ser de energía cristalina | El Guardián de Datos |
-| **Synapse** | Espíritu etéreo | La Guía Neural |
+```yaml
+avatars:
+  - id: nexus
+    name: Nexus
+    role: El Guardián de Datos
+    personality: Directo y preciso. Vas al grano...
+    local: true                       # solo recursos de la máquina
+    model: ollama/ornith:9b
+    image: assets/avatars/nexus.png   # cualquier ruta del disco
+    voice: { engine: sapi, name: Microsoft Helena Desktop, rate: -1 }
+```
+
+| Agente | Avatar | Rol | Privacidad |
+|---|---|---|---|
+| **Vulpis.AI** | Zorro antropomórfico | El Explorador Proactivo | nube |
+| **Unit-A** | Robot / droide | El Asistente Cibernético | **solo local** |
+| **Nexus** | Ser de energía cristalina | El Guardián de Datos | **solo local** |
+| **Synapse** | Espíritu etéreo | La Guía Neural | nube |
+
+**La privacidad es del avatar, y se cumple sola.** Un perfil `local: true` no
+puede hablar con una voz de nube: si el YAML lo pide, el cargador lo corrige a la
+voz del sistema (SAPI). Y con el **modo confidencial** activo el menú solo ofrece
+avatares locales; si el que está puesto usa la nube, se cambia al primero que no
+lo haga en vez de dejar el asistente en un estado imposible.
+
+Con una sola voz española instalada en Windows (Helena), lo que distingue a los
+avatares locales es el **ritmo** (`rate`), no el timbre. Para variedad real hacen
+falta más voces SAPI instaladas o Piper.
 
 ## Licencia
 

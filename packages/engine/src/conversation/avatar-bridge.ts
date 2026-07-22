@@ -28,12 +28,24 @@ const MAX_TEXT = 8_000;
 /** Tope de los valores de config (nombres de modelo/dispositivo). */
 const MAX_FIELD = 256;
 
-/** Motor -> avatar: estado, texto y lista de microfonos disponibles. */
+/** Un perfil de avatar, tal como lo necesita la UI para pintar su menu. */
+export interface AvatarOption {
+  id: string;
+  name: string;
+  role: string;
+  /** Privacidad: solo recursos locales. En confidencial solo se ofrecen estos. */
+  local: boolean;
+  /** Ruta absoluta de la imagen (mismo equipo, otro proceso). */
+  image: string;
+}
+
+/** Motor -> avatar: estado, texto, microfonos y perfiles de avatar. */
 export type AvatarMessage =
   | { type: 'state'; state: ConversationState | 'reposo' }
   | { type: 'user'; text: string }
   | { type: 'assistant'; text: string }
-  | { type: 'devices'; inputs: { name: string; isDefault: boolean }[]; current?: string };
+  | { type: 'devices'; inputs: { name: string; isDefault: boolean }[]; current?: string }
+  | { type: 'avatars'; list: AvatarOption[]; current?: string };
 
 /** Avatar -> motor: cambios de configuracion desde el menu. */
 export interface AlphaConfigMessage {
