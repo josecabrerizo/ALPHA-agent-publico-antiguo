@@ -18,6 +18,8 @@ export interface Settings {
   audioDevice: string;
   /** Escucha activa. false = el motor cierra la captura y suelta el micro. */
   micEnabled: boolean;
+  /** Voz actual del avatar: "sapi:..." o "edge:..." según getAvailableVoices. */
+  voiceId: string;
 }
 
 const DEFAULTS: Settings = {
@@ -26,6 +28,7 @@ const DEFAULTS: Settings = {
   confidential: false,
   audioDevice: '',
   micEnabled: true,
+  voiceId: '', // vacío = usar la predeterminada del avatar
 };
 
 // dist/settings.js -> repoRoot: packages/ui-avatar/dist -> tres niveles arriba.

@@ -15,7 +15,7 @@ import { BUILTIN_TOOLS } from '../brain/tools/builtin.js';
 import { SkillLibrary } from '../brain/skills/library.js';
 import { skillsDir } from '../paths.js';
 import { createSpeaker } from '../tts/speaker.js';
-import { getAvailableVoices } from '../tts/voices.js';
+import { getAvailableVoices, resolveVoiceId } from '../tts/voices.js';
 import { listInputDevices, defaultInputDevice } from '../audio/devices.js';
 import { toDbfs } from '../audio/format.js';
 import { loadConfig } from '../config/loader.js';
@@ -87,6 +87,22 @@ const makeSpeaker = (conf: boolean, av: AvatarProfile | undefined) =>
     rate: av?.voice.rate ?? config.tts.rate,
     confidential: conf,
   });
+
+/**
+ * Crea un speaker con una voz específica elegida por el usuario (voiceId).
+ * Se usa cuando el avatar cambia la voz desde el menú de configuración.
+ */
+const makeSpeakerForVoice = async (voiceId: string, conf: boolean) => {
+  const v = await resolveVoiceId(voiceId, availableVoices);
+  if (!v) throw new Error(`Voz desconocida: "${voiceId}"`);
+  return createSpeaker({
+    engine: v.engine,
+    edgeVoice: v.engine === 'edge' ? v.name : config.tts.edgeVoice,
+    sapiVoice: v.engine === 'sapi' ? v.name : config.tts.sapiVoice,
+    rate: config.tts.rate, // sin cambio de ritmo al cambiar voz
+    confidential: conf,
+  });
+};
 
 let brain = makeBrain(model, confidential, avatar);
 let speaker = makeSpeaker(confidential, avatar);
@@ -234,13 +250,27 @@ bridge.onTextInput((text) => void session.sendText(text));
 
 // Cambios de configuracion desde el avatar (modelo, privacidad, microfono): se
 // aplican en caliente sin cortar la sesion.
-bridge.onConfigMessage((msg) => {
+bridge.onConfigMessage(async (msg) => {
   const s = msg.settings;
 
   // Silenciar el microfono: independiente del resto: sigue valiendo el chat
   // escrito y no toca modelo, voz ni avatar.
   if (typeof s.micEnabled === 'boolean' && s.micEnabled !== session.isMicEnabled()) {
     session.setMicEnabled(s.micEnabled);
+  }
+
+  // Cambio de voz: independiente, no requiere reiniciar nada.
+  if (typeof s.voiceId === 'string' && s.voiceId) {
+    try {
+      const nextSpeaker = await makeSpeakerForVoice(s.voiceId, confidential);
+      speaker.stop();
+      speaker = nextSpeaker;
+      session.reconfigure({ speaker });
+      const voiceInfo = speaker.describe();
+      log(`⚙️  voz: ${voiceInfo.voice}`);
+    } catch (err) {
+      log(`✗ [voz] ${(err as Error).message}`);
+    }
   }
 
   // Microfono: reinicia la captura con el nuevo dispositivo. Se deja que

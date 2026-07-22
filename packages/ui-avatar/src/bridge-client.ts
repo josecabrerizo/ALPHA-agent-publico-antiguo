@@ -64,6 +64,8 @@ export interface ConfigMessage {
     confidential?: boolean;
     audioDevice?: string;
     micEnabled?: boolean;
+    /** Voz del avatar: "sapi:..." o "edge:...". */
+    voiceId?: string;
   };
 }
 

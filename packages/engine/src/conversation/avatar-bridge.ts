@@ -70,6 +70,8 @@ export interface AlphaConfigMessage {
     audioDevice?: string;
     /** false = microfono silenciado (se cierra la captura). */
     micEnabled?: boolean;
+    /** Voz del avatar: "sapi:..." o "edge:...". */
+    voiceId?: string;
   };
 }
 
@@ -205,6 +207,7 @@ function sanitizeSettings(value: unknown): AlphaConfigMessage['settings'] | unde
   if (typeof v['agent'] === 'string') out.agent = v['agent'].slice(0, MAX_FIELD);
   if (typeof v['model'] === 'string') out.model = v['model'].slice(0, MAX_FIELD);
   if (typeof v['audioDevice'] === 'string') out.audioDevice = v['audioDevice'].slice(0, MAX_FIELD);
+  if (typeof v['voiceId'] === 'string') out.voiceId = v['voiceId'].slice(0, MAX_FIELD);
   if (typeof v['confidential'] === 'boolean') out.confidential = v['confidential'];
   if (typeof v['micEnabled'] === 'boolean') out.micEnabled = v['micEnabled'];
   return Object.keys(out).length > 0 ? out : undefined;

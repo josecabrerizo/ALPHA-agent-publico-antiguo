@@ -488,23 +488,23 @@ export class AvatarWindow {
       }
     }
 
-    // Voces disponibles (SAPI locales + Edge nube)
-    const voiceMenu = addSubmenu(menu, 'Voz');
+    // Voz del avatar actual: permite cambiarla entre las disponibles
+    const voiceMenu = addSubmenu(menu, 'Voz del avatar');
     this.menuRefs.push(voiceMenu);
     if (this.voices.length === 0) {
       voiceMenu.addAction(
         this.action('(enumerando voces...)', () => {}, { enabled: false }),
       );
     } else {
+      // Buscar la voz del avatar actual o la guardada en settings
+      const currentVoiceId = this.settings.voiceId;
       for (const v of this.voices) {
-        // La voz se guarda como "engine:name" en el avatar del motor, pero aqui
-        // el usuario solo elige. El motor la aplica (el avatar manda solo engine
-        // y nombre, no la voz: eso lo gestiona conversar.ts).
+        // En confidencial, solo se ofrecen voces locales
+        const blocked = this.settings.confidential && !v.local;
         voiceMenu.addAction(
-          this.action(v.name, () => {
-            // Por ahora solo mostramos; la seleccion de voz se hace en el avatar
-            // (aqui solo informamos de las opciones).
-            log(`voz seleccionada: ${v.name}`);
+          this.action(v.name, () => this.update({ voiceId: v.id }), {
+            checked: v.id === currentVoiceId,
+            enabled: !blocked,
           }),
         );
       }

@@ -126,6 +126,23 @@ const EDGE_SPANISH_VOICES = [
 ];
 
 /**
+ * Busca una voz por su ID ("sapi:..." o "edge:...").
+ * Devuelve {engine, name} si la encuentra, undefined si no.
+ */
+export async function resolveVoiceId(
+  voiceId: string,
+  allVoices: VoiceOption[],
+): Promise<{ engine: 'sapi' | 'edge'; name: string } | undefined> {
+  if (!voiceId) return undefined;
+  const v = allVoices.find((vo) => vo.id === voiceId);
+  if (!v) return undefined;
+  // Extraer: "sapi:Microsoft Helena Desktop" -> name = "Microsoft Helena Desktop"
+  const name = voiceId.split(':', 2)[1];
+  if (!name) return undefined;
+  return { engine: v.engine, name };
+}
+
+/**
  * Recopila todas las voces disponibles: SAPI (local) + Edge (nube).
  * El avatar las muestra con etiqueta de privacidad.
  */
