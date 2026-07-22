@@ -30,6 +30,17 @@ export interface SttConfig {
   language: string;
 }
 
+export interface ConversationConfig {
+  /**
+   * Permitir cortar a A.L.P.H.A. hablandole mientras responde. La interrupcion
+   * la decide la transcripcion (palabras), no el VAD (ruido), y se descarta si
+   * lo oido es su propia voz por el altavoz.
+   */
+  bargeIn: boolean;
+  /** Habla minima (ms) para molestarse en transcribir una posible interrupcion. */
+  bargeInMinMs: number;
+}
+
 export interface AlphaConfig {
   version: number;
   /** Modo confidencial: nada de nube. Es la fuente de verdad; se propaga a
@@ -39,6 +50,7 @@ export interface AlphaConfig {
   agent: string;
   audio: AudioConfig;
   stt: SttConfig;
+  conversation: ConversationConfig;
   brain: BrainConfig;
   tts: TtsConfig;
 }
@@ -50,6 +62,7 @@ export const DEFAULT_CONFIG: AlphaConfig = {
   agent: 'unit-a',
   audio: { device: '', gainDb: 0, normalize: false },
   stt: { model: 'small', language: 'es' },
+  conversation: { bargeIn: true, bargeInMinMs: 600 },
   brain: DEFAULT_BRAIN_CONFIG,
   tts: DEFAULT_TTS_CONFIG,
 };

@@ -25,6 +25,13 @@ stt:
   model: small      # base | small | medium (small es el minimo decente en espanol)
   language: es      # 'auto' para detectar
 
+conversation:
+  # Cortar a A.L.P.H.A. hablandole mientras responde. La interrupcion la decide
+  # la TRANSCRIPCION (que haya palabras), no el VAD (que salta con cualquier
+  # ruido), y se descarta si lo oido es su propia voz por el altavoz.
+  bargeIn: true
+  bargeInMinMs: 600  # habla minima para molestarse en transcribir
+
 # Cerebro. Patron Hermes/OpenClaw: registro de proveedores compatibles con la
 # API de OpenAI + referencia por defecto en formato proveedor/modelo. Un solo
 # cliente sirve para todos; solo cambian baseUrl, clave y modelo.

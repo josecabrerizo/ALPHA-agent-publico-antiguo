@@ -6,12 +6,18 @@ import { WhisperTranscriber } from '../stt/whisper.js';
 import { Brain, type ChatMessage } from '../brain/client.js';
 import type { Speaker } from '../tts/types.js';
 import { SpeechQueue, splitSentences } from './speech-queue.js';
+import { decideBargeIn, mergeUserTurns } from './echo.js';
 
 // Limites por fase para que un proceso o proveedor colgado no deje la sesion en
 // "pensando" para siempre. whisper en CPU puede ser lento y un turno con
 // herramientas encadena varias llamadas, de ahi que sean generosos.
 const STT_TIMEOUT_MS = 120_000;
 const LLM_TIMEOUT_MS = 120_000;
+
+// Barge-in: habla minima para molestarse en transcribir. El VAD salta con
+// cualquier ruido, y transcribir cuesta CPU mientras el LLM genera; este
+// pre-filtro barato descarta chasquidos antes de gastar whisper.
+const DEFAULT_BARGE_IN_MIN_MS = 600;
 
 // Ventana de historial: se conservan los ultimos N mensajes (unos 12 turnos).
 // Evita que la latencia y el gasto crezcan sin fin y desborden el contexto en
@@ -38,6 +44,10 @@ export interface ConversationDeps {
   brain: Brain;
   speaker: Speaker;
   callbacks?: ConversationCallbacks;
+  /** Permitir cortar a A.L.P.H.A. hablandole mientras responde. */
+  bargeIn?: boolean;
+  /** Habla minima (ms) para considerar una interrupcion. */
+  bargeInMinMs?: number;
 }
 
 /**
@@ -65,12 +75,27 @@ export class ConversationSession {
   private busy = false; // hay un turno (voz o texto) en curso
   private turnController: AbortController | undefined; // cancela el turno actual
 
+  private readonly bargeIn: boolean;
+  private readonly bargeInMinMs: number;
+  /** Lo que A.L.P.H.A. lleva dicho en el turno actual, para rechazar su eco. */
+  private spokenSoFar = '';
+  /** Ultimo texto del usuario, para fusionarlo si interrumpe. */
+  private lastUserText = '';
+  /** Turno en vuelo: hay que esperar a que se desenrolle antes de relanzar. */
+  private currentTurn: Promise<void> | undefined;
+  /** Cola de voz del turno actual, para cortarla al interrumpir. */
+  private activeQueue: SpeechQueue | undefined;
+  /** Evita evaluar dos interrupciones a la vez. */
+  private evaluatingBargeIn = false;
+
   constructor(deps: ConversationDeps) {
     this.whisper = deps.whisper;
     this.brain = deps.brain;
     this.speaker = deps.speaker;
     this.cb = deps.callbacks ?? {};
     this.captureOptions = deps.capture ?? {};
+    this.bargeIn = deps.bargeIn ?? true;
+    this.bargeInMinMs = deps.bargeInMinMs ?? DEFAULT_BARGE_IN_MIN_MS;
   }
 
   /**
@@ -123,16 +148,22 @@ export class ConversationSession {
 
       this.cb.onState?.('escuchando');
       try {
+        // El consumo de audio NO se bloquea en el turno: es lo que permite
+        // seguir oyendo mientras responde y poder interrumpirle.
         for await (const utterance of detectUtterances(gate, {
           ...(this.cb.onLevel ? { onLevel: this.cb.onLevel } : {}),
         })) {
           if (!this.running || this.restartRequested) break;
-          this.cb.onLog?.(`voz recibida: ${(utterance.speechMs / 1000).toFixed(1)}s de habla`);
-          gate.setOpen(false); // deja de escuchar mientras responde
-          await this.handleTurn(utterance.pcm);
-          if (!this.running || this.restartRequested) break;
-          this.cb.onState?.('escuchando');
-          gate.setOpen(true); // vuelve a escuchar, descartando lo de mientras
+
+          if (!this.busy) {
+            this.cb.onLog?.(`voz recibida: ${(utterance.speechMs / 1000).toFixed(1)}s de habla`);
+            // Sin barge-in se vuelve al medio duplex: sordo mientras responde.
+            if (!this.bargeIn) gate.setOpen(false);
+            this.currentTurn = this.runTurn(utterance.pcm, gate);
+          } else if (this.bargeIn && utterance.speechMs >= this.bargeInMinMs) {
+            // Puede ser una interrupcion: lo decide la transcripcion, no el VAD.
+            void this.considerBargeIn(utterance.pcm);
+          }
         }
       } catch (error) {
         // Al cambiar de micro destruimos el stream a proposito; ese cierre no
@@ -173,6 +204,72 @@ export class ConversationSession {
    * propio del canal de voz; el resto (pensar y hablar) lo comparte con el
    * texto via respondTo.
    */
+  /**
+   * Envuelve un turno de voz: se lanza sin bloquear el consumo de audio, y al
+   * acabar devuelve el estado a "escuchando" (salvo que una interrupcion ya
+   * haya arrancado otro turno).
+   */
+  private async runTurn(pcm: Buffer, gate: AudioGate): Promise<void> {
+    try {
+      await this.handleTurn(pcm);
+    } catch (error) {
+      this.cb.onError?.('turno', error as Error);
+    } finally {
+      if (this.running && !this.restartRequested && !this.busy) {
+        this.cb.onState?.('escuchando');
+        if (!this.bargeIn) gate.setOpen(true);
+      }
+    }
+  }
+
+  /**
+   * Decide si un tramo de voz oido MIENTRAS responde es una interrupcion real.
+   *
+   * La clave: no la decide el VAD (que salta con cualquier ruido) sino la
+   * transcripcion. Solo hay interrupcion si whisper devuelve palabras y esas
+   * palabras no son el propio asistente oyendose por el altavoz.
+   */
+  private async considerBargeIn(pcm: Buffer): Promise<void> {
+    if (this.evaluatingBargeIn) return; // una evaluacion a la vez
+    this.evaluatingBargeIn = true;
+    try {
+      // Sin la señal del turno: si lo abortamos, no queremos matar esta
+      // transcripcion, que es justo la que decide si abortarlo.
+      const heard = await this.whisper.transcribe(pcm, { timeoutMs: STT_TIMEOUT_MS });
+
+      const verdict = decideBargeIn(heard, this.spokenSoFar);
+      if (verdict === 'ruido') {
+        this.cb.onLog?.('interrupcion descartada: ruido sin palabras');
+        return;
+      }
+      if (verdict === 'eco') {
+        this.cb.onLog?.(`interrupcion descartada: es su propia voz ("${heard}")`);
+        return;
+      }
+      // El turno pudo terminar solo mientras transcribiamos.
+      if (!this.busy || !this.running) return;
+
+      this.cb.onLog?.(`interrumpido por: "${heard}"`);
+      this.turnController?.abort();
+      this.activeQueue?.stop();
+      await this.currentTurn?.catch(() => {});
+
+      // Se fusiona con lo anterior para que responda a todo junto: el caso real
+      // es que sigues completando tu idea mientras ya te contesta. La respuesta
+      // a medias no llega a guardarse (solo se apila al completarse).
+      if (this.history.at(-1)?.role === 'user') this.history.pop();
+      const combined = mergeUserTurns(this.lastUserText, heard);
+      this.cb.onUserText?.(combined);
+      this.currentTurn = this.respondTo(combined).finally(() => {
+        if (this.running && !this.busy) this.cb.onState?.('escuchando');
+      });
+    } catch (error) {
+      this.cb.onError?.('barge-in', error as Error);
+    } finally {
+      this.evaluatingBargeIn = false;
+    }
+  }
+
   private async handleTurn(pcm: Buffer): Promise<void> {
     const t0 = performance.now();
     const controller = new AbortController();
@@ -230,6 +327,8 @@ export class ConversationSession {
     const ms = (from: number) => Math.round(performance.now() - from);
     try {
       this.history.push({ role: 'user', content: text });
+      this.lastUserText = text; // por si hay que fusionar una interrupcion
+      this.spokenSoFar = ''; // el eco se compara contra ESTE turno
       this.cb.onState?.('pensando');
       this.cb.onLog?.('consultando al cerebro…');
       const tBrain = performance.now();
@@ -238,6 +337,7 @@ export class ConversationSession {
         () => this.cb.onState?.('hablando'),
         (error) => this.cb.onError?.('tts', error),
       );
+      this.activeQueue = queue; // para poder cortar la voz al interrumpir
       let full = '';
       let buffer = '';
       let firstToken = false;
@@ -261,6 +361,7 @@ export class ConversationSession {
             this.cb.onLog?.(`primer token del cerebro en ${ms(tBrain)}ms`);
           }
           full += ev.delta;
+          this.spokenSoFar = full; // referencia viva para rechazar su propio eco
           buffer += ev.delta;
           const { sentences, rest } = splitSentences(buffer);
           for (const sentence of sentences) queue.enqueue(sentence);
@@ -287,6 +388,7 @@ export class ConversationSession {
     } finally {
       this.busy = false;
       this.turnController = undefined;
+      this.activeQueue = undefined;
     }
   }
 

@@ -79,6 +79,9 @@ console.log(`  Cerebro:   ${brainInfo.provider}/${brainInfo.model} ${brainInfo.l
 console.log(`  Voz:       ${voiceInfo.engine}/${voiceInfo.voice} ${voiceInfo.local ? '(local)' : '(nube)'}`);
 console.log(`  Herramientas: ${tools.list().map((t) => t.name).join(', ')}`);
 console.log(`  Skills: ${skills.list().map((s) => s.name).join(', ') || '(ninguna)'}`);
+console.log(
+  `  Interrupcion: ${config.conversation.bargeIn ? `si (puedes cortarle hablando, desde ${config.conversation.bargeInMinMs}ms de habla)` : 'no'}`,
+);
 if (confidential) console.log(`  Modo confidencial: ON (sin nube)`);
 
 // Puente hacia el avatar: si esta abierto, refleja el estado y el texto.
@@ -104,6 +107,8 @@ let lastLevelLog = 0;
 let currentMic = captureOptions.device;
 const session = new ConversationSession({
   capture: { ...captureOptions },
+  bargeIn: config.conversation.bargeIn,
+  bargeInMinMs: config.conversation.bargeInMinMs,
   whisper,
   brain,
   speaker,
