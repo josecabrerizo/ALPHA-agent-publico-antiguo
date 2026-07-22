@@ -35,12 +35,25 @@ export interface AvatarOption {
   image: string;
 }
 
+/** Voz disponible para elegir en el avatar. */
+export interface VoiceOption {
+  /** Identificador único: engine:name. */
+  id: string;
+  /** Nombre para mostrar. */
+  name: string;
+  /** Motor: 'sapi' = local, 'edge' = nube de Microsoft. */
+  engine: 'sapi' | 'edge';
+  /** true = solo recursos de la máquina; false = necesita internet. */
+  local: boolean;
+}
+
 export type BridgeMessage =
   | { type: 'state'; state: 'reposo' | 'escuchando' | 'pensando' | 'hablando' }
   | { type: 'user'; text: string }
   | { type: 'assistant'; text: string }
   | { type: 'devices'; inputs: { name: string; isDefault: boolean }[]; current?: string }
-  | { type: 'avatars'; list: AvatarOption[]; current?: string };
+  | { type: 'avatars'; list: AvatarOption[]; current?: string }
+  | { type: 'voices'; list: VoiceOption[] };
 
 /** Avatar -> motor: la config elegida en el menu. */
 export interface ConfigMessage {

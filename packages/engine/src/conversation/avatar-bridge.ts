@@ -39,13 +39,26 @@ export interface AvatarOption {
   image: string;
 }
 
-/** Motor -> avatar: estado, texto, microfonos y perfiles de avatar. */
+/** Voz disponible para elegir en el avatar. */
+export interface VoiceOption {
+  /** Identificador único: engine:name. */
+  id: string;
+  /** Nombre para mostrar. */
+  name: string;
+  /** Motort: 'sapi' = local, 'edge' = nube de Microsoft. */
+  engine: 'sapi' | 'edge';
+  /** true = solo recursos de la máquina; false = necesita internet. */
+  local: boolean;
+}
+
+/** Motor -> avatar: estado, texto, microfonos, voces y perfiles de avatar. */
 export type AvatarMessage =
   | { type: 'state'; state: ConversationState | 'reposo' }
   | { type: 'user'; text: string }
   | { type: 'assistant'; text: string }
   | { type: 'devices'; inputs: { name: string; isDefault: boolean }[]; current?: string }
-  | { type: 'avatars'; list: AvatarOption[]; current?: string };
+  | { type: 'avatars'; list: AvatarOption[]; current?: string }
+  | { type: 'voices'; list: VoiceOption[] };
 
 /** Avatar -> motor: cambios de configuracion desde el menu. */
 export interface AlphaConfigMessage {

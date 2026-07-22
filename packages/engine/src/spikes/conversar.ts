@@ -15,6 +15,7 @@ import { BUILTIN_TOOLS } from '../brain/tools/builtin.js';
 import { SkillLibrary } from '../brain/skills/library.js';
 import { skillsDir } from '../paths.js';
 import { createSpeaker } from '../tts/speaker.js';
+import { getAvailableVoices } from '../tts/voices.js';
 import { listInputDevices, defaultInputDevice } from '../audio/devices.js';
 import { toDbfs } from '../audio/format.js';
 import { loadConfig } from '../config/loader.js';
@@ -204,9 +205,27 @@ function sendAvatars(): void {
     ...(avatar ? { current: avatar.id } : {}),
   });
 }
+
+// Voces disponibles en el sistema (SAPI locales + Edge en la nube).
+// Se calcula una sola vez al arrancar.
+let availableVoices: Awaited<ReturnType<typeof getAvailableVoices>> = [];
+(async () => {
+  try {
+    availableVoices = await getAvailableVoices();
+    log(`voces disponibles: ${availableVoices.length} (${availableVoices.filter((v) => v.local).length} locales)`);
+  } catch {
+    log(`no se pudieron enumerar las voces disponibles`);
+  }
+})();
+
+function sendVoices(): void {
+  bridge.broadcast({ type: 'voices', list: availableVoices });
+}
+
 bridge.onClientConnect(() => {
   void sendDevices();
   sendAvatars();
+  sendVoices();
 });
 void sendDevices();
 

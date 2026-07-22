@@ -34,6 +34,11 @@ const bridge = connectBridge((msg) => {
     avatar.setAvatarOptions(msg.list, msg.current);
     const nombres = msg.list.map((a) => `${a.name}${a.local ? '' : ' (nube)'}`).join(', ');
     log(`avatares: ${nombres || '(ninguno)'} · activo: ${msg.current ?? '(ninguno)'}`);
+  } else if (msg.type === 'voices') {
+    avatar.setVoiceOptions(msg.list);
+    const sapi = msg.list.filter((v) => v.engine === 'sapi').length;
+    const edge = msg.list.filter((v) => v.engine === 'edge').length;
+    log(`voces: ${sapi} locales (SAPI) + ${edge} nube (Edge)`);
   }
 });
 (globalThis as Record<string, unknown>)['__alphaBridge'] = bridge;

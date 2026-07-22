@@ -18,7 +18,7 @@ import {
   TransformationMode,
 } from '@nodegui/nodegui';
 import path from 'node:path';
-import type { AvatarOption } from './bridge-client.js';
+import type { AvatarOption, VoiceOption } from './bridge-client.js';
 import { log } from './log.js';
 import { STATE_CYCLE, MAX_PULSE, type AvatarState } from './states.js';
 import { AGENTS, AGENT_ORDER, type AgentId } from './agents.js';
@@ -112,6 +112,9 @@ export class AvatarWindow {
   /** Microfonos que manda el motor; el menu "Sonido" se llena con ellos. */
   private micDevices: { name: string; isDefault: boolean }[] = [];
 
+  /** Voces disponibles (SAPI locales + Edge nube). */
+  private voices: VoiceOption[] = [];
+
   constructor() {
     this.setupWindow();
     this.setupOrb();
@@ -164,6 +167,11 @@ export class AvatarWindow {
       saveSettings(this.settings);
     }
     this.applyPortrait();
+  }
+
+  /** Recibe del motor la lista de voces disponibles (SAPI + Edge). */
+  setVoiceOptions(list: VoiceOption[]): void {
+    this.voices = list;
   }
 
   /** Muestra texto en el bocadillo (la ventana se expande) y se esfuma sola. */
@@ -476,6 +484,28 @@ export class AvatarWindow {
         const label = dev.isDefault ? `${dev.name}  (predeterminado)` : dev.name;
         soundMenu.addAction(
           this.action(label, () => this.update({ audioDevice: dev.name }), { checked: isCurrent }),
+        );
+      }
+    }
+
+    // Voces disponibles (SAPI locales + Edge nube)
+    const voiceMenu = addSubmenu(menu, 'Voz');
+    this.menuRefs.push(voiceMenu);
+    if (this.voices.length === 0) {
+      voiceMenu.addAction(
+        this.action('(enumerando voces...)', () => {}, { enabled: false }),
+      );
+    } else {
+      for (const v of this.voices) {
+        // La voz se guarda como "engine:name" en el avatar del motor, pero aqui
+        // el usuario solo elige. El motor la aplica (el avatar manda solo engine
+        // y nombre, no la voz: eso lo gestiona conversar.ts).
+        voiceMenu.addAction(
+          this.action(v.name, () => {
+            // Por ahora solo mostramos; la seleccion de voz se hace en el avatar
+            // (aqui solo informamos de las opciones).
+            log(`voz seleccionada: ${v.name}`);
+          }),
         );
       }
     }
