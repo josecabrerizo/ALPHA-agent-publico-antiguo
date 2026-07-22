@@ -23,6 +23,7 @@ A.L.P.H.A. piensa (con herramientas y skills) y responde con voz. Falta la visi�
 | Cerebro LLM (compatible-OpenAI: Ollama + nube) | ✅ |
 | Voz (msedge-tts online / SAPI local) | ✅ |
 | Avatar flotante (NodeGui) + menú de configuración | ✅ |
+| Interruptor de micrófono (suelta el dispositivo) | ✅ |
 | Puente motor↔avatar (TCP local con token) | ✅ |
 | Bucle completo escuchar→pensar→hablar | ✅ |
 | Chat escrito | ✅ |
@@ -251,6 +252,23 @@ lo haga en vez de dejar el asistente en un estado imposible.
 Con una sola voz española instalada en Windows (Helena), lo que distingue a los
 avatares locales es el **ritmo** (`rate`), no el timbre. Para variedad real hacen
 falta más voces SAPI instaladas o Piper.
+
+### Silenciar el micrófono
+
+El icono 🎤 de la ventana **cierra la captura**, no la ignora: ffmpeg muere y el
+dispositivo queda libre, así que el indicador de micrófono de Windows se apaga.
+Un mute que dejara el micro abierto sería una media verdad. El chat escrito
+sigue funcionando con el micrófono cerrado.
+
+### Dos motores a la vez
+
+El puente usa un puerto fijo, así que un segundo motor lo encuentra ocupado y se
+queda sin avatar. Ahora lo dice al arrancar en vez de anunciar que escucha, y se
+puede levantar otra instancia para probar sin matar la que esté en uso:
+
+```bash
+ALPHA_BRIDGE_PORT=43118 npm run spike:conversar
+```
 
 ## Licencia
 

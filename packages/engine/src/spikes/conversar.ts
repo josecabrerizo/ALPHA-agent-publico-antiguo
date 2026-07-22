@@ -107,9 +107,18 @@ console.log(
 if (confidential) console.log(`  Modo confidencial: ON (sin nube)`);
 
 // Puente hacia el avatar: si esta abierto, refleja el estado y el texto.
-const bridge = new AvatarBridge();
-await bridge.start();
-console.log(`  Avatar: escuchando en 127.0.0.1:${AVATAR_BRIDGE_PORT} (lanza "npm run avatar" para verlo)`);
+// Puerto configurable: si ya hay un motor corriendo, el puerto fijo esta
+// ocupado y el segundo se queda mudo sin decirlo. Con esto se puede levantar
+// otra instancia (probar cambios sin matar la que este en uso).
+const bridgePort = Number(process.env['ALPHA_BRIDGE_PORT']) || AVATAR_BRIDGE_PORT;
+const bridge = new AvatarBridge(bridgePort);
+const bridgeUp = await bridge.start();
+console.log(
+  bridgeUp
+    ? `  Avatar: escuchando en 127.0.0.1:${bridgePort} (lanza "npm run avatar" para verlo)`
+    : `  Avatar: PUERTO ${bridgePort} OCUPADO (¿otro motor corriendo?) — este motor no tendra avatar.\n` +
+      `          Para levantar otra instancia: ALPHA_BRIDGE_PORT=43118 npm run spike:conversar`,
+);
 console.log(`  Habla cuando quieras. Ctrl+C para salir.\n`);
 
 const ICON: Record<ConversationState, string> = { escuchando: '👂', pensando: '🧠', hablando: '🗣️' };
@@ -153,6 +162,11 @@ const session = new ConversationSession({
       }
     },
     onLog: (m) => log(`   ${m}`),
+    onMicChange: (enabled) => {
+      log(enabled ? '🎤 microfono activo' : '🔇 microfono silenciado');
+      // Con el micro cerrado no esta "escuchando": el avatar pasa a reposo.
+      if (!enabled) bridge.broadcast({ type: 'state', state: 'reposo' });
+    },
     onUserText: (t) => {
       log(`tú    › ${t}`);
       bridge.broadcast({ type: 'user', text: t });
@@ -203,6 +217,12 @@ bridge.onTextInput((text) => void session.sendText(text));
 // aplican en caliente sin cortar la sesion.
 bridge.onConfigMessage((msg) => {
   const s = msg.settings;
+
+  // Silenciar el microfono: independiente del resto: sigue valiendo el chat
+  // escrito y no toca modelo, voz ni avatar.
+  if (typeof s.micEnabled === 'boolean' && s.micEnabled !== session.isMicEnabled()) {
+    session.setMicEnabled(s.micEnabled);
+  }
 
   // Microfono: reinicia la captura con el nuevo dispositivo. Se deja que
   // setAudioDevice sea quien actualiza el estado de la sesion.

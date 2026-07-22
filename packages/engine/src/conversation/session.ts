@@ -36,6 +36,8 @@ export interface ConversationCallbacks {
   onError?(where: string, error: Error): void;
   /** Traza con tiempos de cada fase del turno, para depurar y medir latencias. */
   onLog?(message: string): void;
+  /** El microfono se ha silenciado o reactivado. */
+  onMicChange?(enabled: boolean): void;
 }
 
 export interface ConversationDeps {
@@ -88,6 +90,11 @@ export class ConversationSession {
   /** Evita evaluar dos interrupciones a la vez. */
   private evaluatingBargeIn = false;
 
+  /** Microfono activo. Silenciarlo SUELTA el dispositivo, no solo lo ignora. */
+  private micEnabled = true;
+  /** Despierta al bucle de captura cuando se reactiva el microfono. */
+  private micResume: (() => void) | undefined;
+
   constructor(deps: ConversationDeps) {
     this.whisper = deps.whisper;
     this.brain = deps.brain;
@@ -128,6 +135,38 @@ export class ConversationSession {
     handle?.pcm.destroy(); // fuerza el fin del for-await ya mismo
   }
 
+  /**
+   * Silencia o reactiva el microfono.
+   *
+   * Silenciar CIERRA la captura, no la ignora: ffmpeg muere y el dispositivo
+   * queda libre, asi que el indicador de microfono del sistema se apaga. Un
+   * "mute" que dejara el micro abierto seria una media verdad, y aqui la
+   * privacidad es el producto. El chat escrito sigue funcionando.
+   */
+  setMicEnabled(enabled: boolean): void {
+    if (enabled === this.micEnabled) return;
+    this.micEnabled = enabled;
+    this.cb.onMicChange?.(enabled);
+    if (enabled) {
+      this.cb.onLog?.('microfono reactivado');
+      this.micResume?.();
+      this.micResume = undefined;
+      return;
+    }
+    this.cb.onLog?.('microfono silenciado: se cierra la captura');
+    // Mismo cierre deliberado que al cambiar de micro: matar ffmpeg no basta,
+    // en Windows el pipe puede quedarse abierto y colgar el for-await.
+    this.restartRequested = true;
+    const handle = this.handle;
+    this.handle = undefined;
+    handle?.stop();
+    handle?.pcm.destroy();
+  }
+
+  isMicEnabled(): boolean {
+    return this.micEnabled;
+  }
+
   async run(): Promise<void> {
     this.running = true;
     // Bucle externo: mientras la sesion este activa, se mantiene la captura. Si
@@ -137,6 +176,16 @@ export class ConversationSession {
     // mataba la sesion cuando un dispositivo se cerraba por su cuenta.
     let fastFailures = 0;
     while (this.running) {
+      // Con el microfono silenciado no se abre captura ninguna: se espera aqui
+      // hasta que lo reactiven (o hasta stop()), sin girar en vacio.
+      if (!this.micEnabled) {
+        await new Promise<void>((resolve) => {
+          this.micResume = resolve;
+          if (!this.running || this.micEnabled) resolve(); // carrera: ya cambio
+        });
+        this.micResume = undefined;
+        if (!this.running) break;
+      }
       this.restartRequested = false;
       const openedAt = performance.now();
       const capture = captureMicrophone(this.captureOptions);
@@ -397,5 +446,6 @@ export class ConversationSession {
     this.turnController?.abort(); // cancela STT/LLM del turno en curso
     this.speaker.stop();
     this.handle?.stop();
+    this.micResume?.(); // si estaba esperando a que reactiven el micro, que salga
   }
 }

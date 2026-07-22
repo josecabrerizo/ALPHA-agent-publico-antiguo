@@ -50,7 +50,14 @@ export type AvatarMessage =
 /** Avatar -> motor: cambios de configuracion desde el menu. */
 export interface AlphaConfigMessage {
   type: 'config';
-  settings: { agent?: string; model?: string; confidential?: boolean; audioDevice?: string };
+  settings: {
+    agent?: string;
+    model?: string;
+    confidential?: boolean;
+    audioDevice?: string;
+    /** false = microfono silenciado (se cierra la captura). */
+    micEnabled?: boolean;
+  };
 }
 
 /** Avatar -> motor: mensaje escrito (chat de texto). */
@@ -82,7 +89,8 @@ export class AvatarBridge {
     this.onConnect.push(handler);
   }
 
-  async start(): Promise<void> {
+  /** true si quedo escuchando; false si el puerto estaba ocupado. */
+  async start(): Promise<boolean> {
     // Token nuevo cada arranque, escrito a un fichero que solo el usuario lee.
     this.token = randomBytes(24).toString('hex');
     try {
@@ -99,8 +107,11 @@ export class AvatarBridge {
         socket.on('close', () => this.authed.delete(socket));
         socket.on('error', () => this.authed.delete(socket));
       });
-      server.listen(this.port, '127.0.0.1', () => resolve());
-      server.on('error', () => resolve()); // puerto ocupado: seguimos sin avatar
+      server.listen(this.port, '127.0.0.1', () => resolve(true));
+      // Puerto ocupado (tipico: ya hay otro motor corriendo). Se sigue sin
+      // avatar, pero se DICE: antes se anunciaba "escuchando" igualmente y el
+      // segundo motor quedaba mudo sin que nada lo delatara.
+      server.on('error', () => resolve(false));
       this.server = server;
     });
   }
@@ -182,5 +193,6 @@ function sanitizeSettings(value: unknown): AlphaConfigMessage['settings'] | unde
   if (typeof v['model'] === 'string') out.model = v['model'].slice(0, MAX_FIELD);
   if (typeof v['audioDevice'] === 'string') out.audioDevice = v['audioDevice'].slice(0, MAX_FIELD);
   if (typeof v['confidential'] === 'boolean') out.confidential = v['confidential'];
+  if (typeof v['micEnabled'] === 'boolean') out.micEnabled = v['micEnabled'];
   return Object.keys(out).length > 0 ? out : undefined;
 }

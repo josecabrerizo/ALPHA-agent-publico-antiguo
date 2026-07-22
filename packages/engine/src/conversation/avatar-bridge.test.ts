@@ -56,6 +56,35 @@ test('con el token correcto, los comandos pasan', async () => {
   });
 });
 
+test('el interruptor de microfono llega validado y descarta la basura', async () => {
+  await withBridge(async (bridge, token) => {
+    const recibidos: unknown[] = [];
+    bridge.onConfigMessage((m) => recibidos.push(m.settings));
+
+    const c = client();
+    await new Promise((r) => c.on('connect', r));
+    c.write(JSON.stringify({ type: 'auth', token }) + '\n');
+    await tick();
+    c.write(JSON.stringify({ type: 'config', settings: { micEnabled: false } }) + '\n');
+    // "false" en texto no es un booleano: se descarta, y con el objeto vacio no
+    // se emite nada. Silenciar el micro no puede depender de un cast.
+    c.write(JSON.stringify({ type: 'config', settings: { micEnabled: 'false' } }) + '\n');
+    await tick();
+    c.destroy();
+
+    assert.deepEqual(recibidos, [{ micEnabled: false }]);
+  });
+});
+
+test('un segundo puente en el mismo puerto avisa en vez de fingir que escucha', async () => {
+  await withBridge(async () => {
+    const segundo = new AvatarBridge(TEST_PORT);
+    const escuchando = await segundo.start();
+    segundo.stop();
+    assert.equal(escuchando, false, 'el puerto esta ocupado y hay que decirlo');
+  });
+});
+
 test('solo los clientes autenticados reciben difusiones', async () => {
   await withBridge(async (bridge, token) => {
     const c = client();

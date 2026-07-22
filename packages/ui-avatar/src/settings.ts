@@ -16,6 +16,8 @@ export interface Settings {
   confidential: boolean;
   /** Microfono elegido. Vacio = el predeterminado del sistema. */
   audioDevice: string;
+  /** Escucha activa. false = el motor cierra la captura y suelta el micro. */
+  micEnabled: boolean;
 }
 
 const DEFAULTS: Settings = {
@@ -23,6 +25,7 @@ const DEFAULTS: Settings = {
   model: 'ollama/gemma4:12b',
   confidential: false,
   audioDevice: '',
+  micEnabled: true,
 };
 
 // dist/settings.js -> repoRoot: packages/ui-avatar/dist -> tres niveles arriba.

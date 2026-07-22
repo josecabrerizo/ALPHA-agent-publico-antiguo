@@ -45,7 +45,13 @@ export type BridgeMessage =
 /** Avatar -> motor: la config elegida en el menu. */
 export interface ConfigMessage {
   type: 'config';
-  settings: { agent?: string; model?: string; confidential?: boolean; audioDevice?: string };
+  settings: {
+    agent?: string;
+    model?: string;
+    confidential?: boolean;
+    audioDevice?: string;
+    micEnabled?: boolean;
+  };
 }
 
 /** Avatar -> motor: un mensaje escrito. */

@@ -3,6 +3,7 @@ import {
   QWidget,
   QLabel,
   QLineEdit,
+  QPushButton,
   QMenu,
   QAction,
   QPoint,
@@ -19,7 +20,7 @@ import {
 import path from 'node:path';
 import type { AvatarOption } from './bridge-client.js';
 import { log } from './log.js';
-import { STATE_RHYTHMS, STATE_CYCLE, MAX_PULSE, type AvatarState } from './states.js';
+import { STATE_CYCLE, MAX_PULSE, type AvatarState } from './states.js';
 import { AGENTS, AGENT_ORDER, type AgentId } from './agents.js';
 import { loadSettings, saveSettings, MODEL_OPTIONS, type Settings } from './settings.js';
 
@@ -35,9 +36,10 @@ const BASE_RADIUS = 62;
 /** Caja donde se encaja el retrato, conservando su proporcion. */
 const PORTRAIT_MAX_W = 168;
 const PORTRAIT_MAX_H = VISUAL_H;
-/** Amplitud de la respiracion del retrato: mucho mas sutil que la del orbe. */
-const PORTRAIT_BREATH = 250;
 const CAPTION_MS = 9000; // cuanto se queda el ultimo texto antes de esfumarse
+
+/** Boton de micro: pequeno, en la esquina de la zona del avatar. */
+const MIC_SIZE = 30;
 
 const PAD = 12; // margen lateral
 const GAP = 10; // separacion vertical entre piezas
@@ -80,6 +82,8 @@ export class AvatarWindow {
   private readonly portrait = new QLabel();
   private readonly caption = new QLabel();
   private readonly input = new QLineEdit();
+  /** Interruptor de escucha: apagarlo hace que el motor suelte el microfono. */
+  private readonly micButton = new QPushButton();
 
   /** Tamano base del retrato ya encajado; undefined = no hay imagen que pintar. */
   private portraitBase: { w: number; h: number } | undefined;
@@ -91,9 +95,7 @@ export class AvatarWindow {
 
   private settings: Settings = loadSettings();
   private state: AvatarState = 'reposo';
-  private timer: NodeJS.Timeout | undefined;
   private captionTimer: NodeJS.Timeout | undefined;
-  private phase = 0;
 
   // El menu y sus acciones se guardan para que el GC no se los lleve mientras
   // estan en pantalla.
@@ -116,9 +118,9 @@ export class AvatarWindow {
     this.setupPortrait();
     this.setupCaption();
     this.setupInput();
+    this.setupMicButton();
     this.setupMouse();
     this.applyPortrait();
-    this.startBreathing();
   }
 
   show(): void {
@@ -243,6 +245,7 @@ export class AvatarWindow {
       this.portraitBase = undefined;
       this.portrait.hide();
       this.paintOrb();
+      this.layoutVisual();
       log(`retrato de "${this.settings.agent}" no disponible (${file || 'sin ruta'}); se usa el orbe`);
       return;
     }
@@ -256,6 +259,7 @@ export class AvatarWindow {
     this.portrait.setPixmap(scaled);
     this.portrait.show();
     this.paintOrb();
+    this.layoutVisual();
     log(`retrato: ${this.settings.agent} (${scaled.width()}×${scaled.height()})`);
   }
 
@@ -296,6 +300,36 @@ export class AvatarWindow {
       this.input.clear();
       this.onTextSubmit?.(text);
     });
+  }
+
+  /**
+   * Interruptor de escucha. Apagarlo no es cosmetico: el motor cierra la
+   * captura y suelta el microfono, asi que el indicador del sistema se apaga.
+   * El chat escrito sigue funcionando con el micro cerrado.
+   */
+  private setupMicButton(): void {
+    this.micButton.setParent(this.root);
+    this.micButton.setGeometry(PAD, VISUAL_BOTTOM - MIC_SIZE, MIC_SIZE, MIC_SIZE);
+    this.micButton.addEventListener('clicked', () => {
+      this.update({ micEnabled: !this.settings.micEnabled });
+      log(this.settings.micEnabled ? 'micrófono activado' : 'micrófono silenciado');
+    });
+    this.paintMicButton();
+  }
+
+  private paintMicButton(): void {
+    const on = this.settings.micEnabled;
+    this.micButton.setText(on ? '🎤' : '🔇');
+    this.micButton.setToolTip(
+      on ? 'Escuchando — clic para silenciar' : 'Micrófono cerrado — clic para escuchar',
+    );
+    this.micButton.setInlineStyle(`
+      background: ${on ? 'rgba(30, 33, 44, 210)' : 'rgba(120, 40, 45, 225)'};
+      border: 1px solid rgba(255, 255, 255, ${on ? 55 : 95});
+      border-radius: ${MIC_SIZE / 2}px;
+      font-size: 13px;
+      padding: 0px;
+    `);
   }
 
   /**
@@ -368,6 +402,7 @@ export class AvatarWindow {
     saveSettings(this.settings);
     // applyPortrait repinta tambien el orbe/halo, asi que cubre los dos casos.
     this.applyPortrait();
+    this.paintMicButton();
     this.onSettingsChanged?.(this.settings);
   }
 
@@ -498,40 +533,23 @@ export class AvatarWindow {
   }
 
   /**
-   * "Respiracion": el orbe crece y mengua con una sinusoide, recentrandose en
-   * el lienzo. El ritmo lo marca el estado actual.
+   * Coloca retrato y halo. Es estatico a proposito: la respiracion sinusoidal
+   * anterior se ha quitado y el dinamismo se replanteara mas adelante.
    */
-  private startBreathing(): void {
-    const FPS = 30;
-    this.timer = setInterval(() => {
-      const { breatheMs, pulse } = STATE_RHYTHMS[this.state];
-      this.phase += (1000 / FPS / breatheMs) * 2 * Math.PI;
-      const wave = Math.sin(this.phase);
-      const radius = BASE_RADIUS + wave * pulse;
-      this.orb.setGeometry(
-        Math.round(ORB_CX - radius),
-        Math.round(ORB_CY - radius),
-        Math.round(radius * 2),
-        Math.round(radius * 2),
-      );
-      if (!this.portraitBase) return;
-      // El retrato respira anclado por abajo: crece hacia arriba, como quien
-      // toma aire, en vez de flotar. Asi el hueco con el bocadillo no cambia.
-      const { w, h } = this.portraitBase;
-      const scale = 1 + (wave * pulse) / PORTRAIT_BREATH;
-      const pw = Math.round(w * scale);
-      const ph = Math.round(h * scale);
-      this.portrait.setGeometry(
-        Math.round(ORB_CX - pw / 2),
-        Math.round(VISUAL_BOTTOM - ph),
-        pw,
-        ph,
-      );
-    }, 1000 / FPS);
+  private layoutVisual(): void {
+    this.orb.setGeometry(
+      Math.round(ORB_CX - BASE_RADIUS),
+      Math.round(ORB_CY - BASE_RADIUS),
+      BASE_RADIUS * 2,
+      BASE_RADIUS * 2,
+    );
+    if (!this.portraitBase) return;
+    // Anclado por abajo: los pies del personaje quedan al ras del bocadillo.
+    const { w, h } = this.portraitBase;
+    this.portrait.setGeometry(Math.round(ORB_CX - w / 2), VISUAL_BOTTOM - h, w, h);
   }
 
   dispose(): void {
-    if (this.timer) clearInterval(this.timer);
     if (this.captionTimer) clearTimeout(this.captionTimer);
   }
 }
