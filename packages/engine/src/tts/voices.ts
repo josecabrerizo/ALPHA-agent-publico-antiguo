@@ -14,12 +14,12 @@ export async function listSapiVoices(): Promise<string[]> {
   if (process.platform !== 'win32') return [];
 
   return new Promise((resolve) => {
-    const script = [
-      'Add-Type -AssemblyName System.Speech',
-      '(New-Object System.Speech.Synthesis.SpeechSynthesizer).GetInstalledVoices() |',
-      'Select-Object -ExpandProperty VoiceInfo |',
-      'Select-Object -ExpandProperty Name',
-    ].join('; ');
+    // PowerShell: el script tiene que estar en una linea con | sin punto y coma.
+    const script =
+      'Add-Type -AssemblyName System.Speech; ' +
+      '(New-Object System.Speech.Synthesis.SpeechSynthesizer).GetInstalledVoices() | ' +
+      'Select-Object -ExpandProperty VoiceInfo | ' +
+      'Select-Object -ExpandProperty Name';
 
     let output = '';
     const ps = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], {
