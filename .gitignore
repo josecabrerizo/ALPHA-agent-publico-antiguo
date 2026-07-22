@@ -11,6 +11,10 @@ models/
 *.wav
 *.png
 
+# ...pero los retratos de los avatares son parte del producto: sin ellos, un
+# clon nuevo se queda sin caras.
+!assets/avatars/*.png
+
 # Secretos: claves de proveedores de nube
 .env
 .env.*
