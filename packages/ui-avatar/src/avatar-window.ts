@@ -20,7 +20,6 @@ import {
 import path from 'node:path';
 import type { AvatarOption, VoiceOption } from './bridge-client.js';
 import { log } from './log.js';
-import { ANIMATIONS, KEYFRAMES } from './animations.js';
 import { STATE_CYCLE, MAX_PULSE, type AvatarState } from './states.js';
 import { AGENTS, AGENT_ORDER, type AgentId } from './agents.js';
 import { loadSettings, saveSettings, MODEL_OPTIONS, type Settings } from './settings.js';
