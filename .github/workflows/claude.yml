@@ -1,0 +1,99 @@
+name: Claude Code
+
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+
+jobs:
+  claude:
+    if: |
+      (github.event.action == 'labeled' && github.event.label.name == 'agent-ready') ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      # Dos modos:
+      #  - Issue etiquetada (agent-ready) o comentario @claude en una ISSUE →
+      #    se trabaja desde 'master' y se abre un PR nuevo.
+      #  - Comentario @claude en un PR → se trabaja sobre la RAMA DE ESE PR y se
+      #    hace push a esa misma rama (no se abre PR nuevo).
+      - name: Resolve target ref
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "${{ github.event.issue.pull_request.url }}" ]; then
+            branch=$(gh pr view "${{ github.event.issue.number }}" --repo "${{ github.repository }}" --json headRefName -q .headRefName)
+            echo "is_pr=true" >> "$GITHUB_OUTPUT"
+            echo "ref=$branch" >> "$GITHUB_OUTPUT"
+            echo "Comentario en PR #${{ github.event.issue.number }} → rama '$branch'"
+          else
+            echo "is_pr=false" >> "$GITHUB_OUTPUT"
+            echo "ref=master" >> "$GITHUB_OUTPUT"
+            echo "Issue/label → rama 'master'"
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.target.outputs.ref }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ── Modo ISSUE: implementar en rama nueva desde master y abrir PR ──────
+      - name: Run Claude Code (issue → nuevo PR)
+        if: steps.target.outputs.is_pr != 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          show_full_output: true
+          prompt: |
+            Lee la incidencia de GitHub que ha disparado este workflow (título y descripción).
+            Implementa el cambio solicitado (corrección de bug o nueva funcionalidad) en una RAMA NUEVA
+            partiendo de 'master' (nunca cambies la rama base).
+            Sigue las convenciones del repositorio descritas en CLAUDE.md.
+            Ejecuta los tests (`npm run check` o similar) y corrige hasta que pasen.
+            Cuando esté listo, abre un PULL REQUEST con BASE = 'master'. En la DESCRIPCIÓN del PR
+            incluye "Closes #<número-de-la-incidencia>", un resumen de los cambios y una sección
+            "Cómo probar".
+            Nunca abras PRs contra otras ramas. NO fusiones el PR: lo revisará una persona.
+          claude_args: |
+            --model claude-opus-4-8
+            --max-turns 100
+            --allowed-tools "Read,Edit,Write,Glob,Grep,Bash"
+
+      # ── Modo PR: aplicar lo que pide el comentario sobre la rama del PR ─────
+      - name: Run Claude Code (comentario en PR → push a esa rama)
+        if: steps.target.outputs.is_pr == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          show_full_output: true
+          prompt: |
+            Estás trabajando sobre la rama del PR #${{ github.event.issue.number }} (ya está clonada y en checkout).
+            Aplica EXACTAMENTE lo que pide este comentario del PR, de forma ACOTADA (no toques cosas no relacionadas):
+            ---
+            ${{ github.event.comment.body }}
+            ---
+            Sigue las convenciones del repositorio descritas en CLAUDE.md.
+            Ejecuta los tests y corrige hasta que pasen.
+            Haz commit y PUSH a ESTA MISMA rama del PR (git push al remoto de la rama actual).
+            NO abras un PR nuevo, NO cambies de rama, NO fusiones. Puedes dejar un comentario breve en el PR con lo hecho.
+          claude_args: |
+            --model claude-opus-4-8
+            --max-turns 100
+            --allowed-tools "Read,Edit,Write,Glob,Grep,Bash"

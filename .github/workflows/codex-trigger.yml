@@ -1,0 +1,47 @@
+name: Codex Trigger
+
+# Comenta "@codex review" automáticamente en cada PR nuevo (o reabierto) contra
+# master, para disparar la revisión de Codex.
+#
+# El comentario se publica con la identidad de un USUARIO (PAT en el secreto
+# CODEX_TRIGGER_TOKEN), NO con github-actions[bot], porque Codex solo atiende a
+# usuarios con su cuenta vinculada.
+#
+# Solo opened/reopened (NO synchronize): no re-dispara en cada push.
+
+on:
+  pull_request:
+    types: [opened, reopened]
+    branches: [master]
+
+# El GITHUB_TOKEN por defecto no se usa para escribir (lo hace el PAT); mínimo.
+permissions:
+  pull-requests: read
+
+jobs:
+  comment:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Comentar "@codex review" (identidad de usuario vía PAT)
+        uses: actions/github-script@v7
+        with:
+          # PAT de usuario → el comentario lo firma esa cuenta (no el bot).
+          github-token: ${{ secrets.CODEX_TRIGGER_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const marker = "@codex review";
+            // Pedimos el idioma en el propio comando (es la señal que más respeta Codex).
+            const body = "@codex review\n\nResponde SIEMPRE en español: el resumen, los hallazgos y todos los comentarios deben estar en español.";
+
+            // Idempotencia: si ya hay un comentario "@codex review", no duplicar.
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number, per_page: 100,
+            });
+            if (comments.some((c) => (c.body || "").includes(marker))) {
+              core.info("Ya existe un comentario '@codex review'; no se duplica.");
+              return;
+            }
+
+            await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            core.info("Comentario '@codex review' publicado.");
