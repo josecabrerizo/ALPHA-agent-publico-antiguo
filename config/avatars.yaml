@@ -48,7 +48,7 @@ avatars:
     image: assets/avatars/unit-a.svg
     voice:
       engine: sapi
-      name: Microsoft Helena Desktop
+      name: Microsoft Zira Desktop
       rate: 1 # algo mas rapido: eficiente
 
   - id: nexus
