@@ -45,7 +45,7 @@ avatars:
       solo si hace falta.
     local: true
     model: ollama/gemma4:12b
-    image: assets/avatars/unit-a.png
+    image: assets/avatars/unit-a.svg
     voice:
       engine: sapi
       name: Microsoft Helena Desktop

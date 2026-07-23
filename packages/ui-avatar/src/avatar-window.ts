@@ -20,6 +20,7 @@ import {
 import path from 'node:path';
 import type { AvatarOption, VoiceOption } from './bridge-client.js';
 import { log } from './log.js';
+import { ANIMATIONS, KEYFRAMES } from './animations.js';
 import { STATE_CYCLE, MAX_PULSE, type AvatarState } from './states.js';
 import { AGENTS, AGENT_ORDER, type AgentId } from './agents.js';
 import { loadSettings, saveSettings, MODEL_OPTIONS, type Settings } from './settings.js';
@@ -223,9 +224,12 @@ export class AvatarWindow {
    */
   private setupPortrait(): void {
     this.portrait.setParent(this.root);
-    this.portrait.setInlineStyle('background: transparent;');
-    // La imagen se estira al tamano de la etiqueta; como la respiracion escala
+    // Las animaciones requieren CSS: inyecta las keyframes al estilo inline.
+    // La imagen se estira al tamano de la etiqueta; como las animaciones escalan
     // ancho y alto por el mismo factor, la proporcion no se deforma.
+    this.portrait.setInlineStyle(
+      `background: transparent; ${ANIMATIONS.reposo} transition: all 0.5s ease-in-out;`,
+    );
     this.portrait.setScaledContents(true);
     this.portrait.hide();
   }
@@ -239,7 +243,17 @@ export class AvatarWindow {
     const fromEngine = this.avatars.find((a) => a.id === id)?.image;
     if (fromEngine) return fromEngine;
     // dist/avatar-window.js -> repoRoot: tres niveles arriba (como el token).
-    return path.resolve(__dirname, '..', '..', '..', 'assets', 'avatars', `${id}.png`);
+    // Soporta PNG y SVG: intenta SVG primero, luego PNG como fallback.
+    const basePath = path.resolve(__dirname, '..', '..', '..', 'assets', 'avatars', id);
+    const svgPath = `${basePath}.svg`;
+    const pngPath = `${basePath}.png`;
+    try {
+      const { existsSync } = require('node:fs');
+      if (existsSync(svgPath)) return svgPath;
+    } catch {
+      // Si falla la busqueda de SVG, usa PNG.
+    }
+    return pngPath;
   }
 
   /**
@@ -268,7 +282,8 @@ export class AvatarWindow {
     this.portrait.show();
     this.paintOrb();
     this.layoutVisual();
-    log(`retrato: ${this.settings.agent} (${scaled.width()}×${scaled.height()})`);
+    const isSvg = file.endsWith('.svg');
+    log(`retrato: ${this.settings.agent} (${scaled.width()}×${scaled.height()})${isSvg ? ' [SVG animado]' : ''}`);
   }
 
   /** Bocadillo de texto bajo el orbe. Oculto hasta que llega algo que decir. */
