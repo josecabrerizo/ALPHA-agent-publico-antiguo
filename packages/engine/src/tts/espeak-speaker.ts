@@ -59,7 +59,11 @@ export class EspeakSpeaker implements Speaker {
   ) {}
 
   describe(): ReturnType<Speaker['describe']> {
-    return { engine: 'espeak', voice: `${path.basename(this.binary)} · ${this.language}`, local: true };
+    return {
+      engine: 'espeak',
+      voice: `${path.basename(this.binary)} · ${this.language}`,
+      local: true,
+    };
   }
 
   async speak(text: string): Promise<void> {

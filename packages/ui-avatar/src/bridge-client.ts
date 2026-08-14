@@ -19,10 +19,19 @@ const DEFAULT_PORT = 43117;
  * dejaba su avatar sin forma de conectarse.
  */
 const PORT = Number(process.env['ALPHA_BRIDGE_PORT']) || DEFAULT_PORT;
-// dist/bridge-client.js -> repoRoot: tres niveles arriba. El fichero de token va
-// atado al puerto (ver bridgeTokenPathFor en el motor): una instancia, un token.
-const tokenFile = PORT === DEFAULT_PORT ? 'alpha.bridge-token' : `alpha.bridge-token.${PORT}`;
-const tokenPath = path.resolve(__dirname, '..', '..', '..', 'config', tokenFile);
+
+/**
+ * Nombre del fichero de token para un puerto. Va ATADO AL PUERTO (igual que
+ * bridgeTokenPathFor en el motor): dos instancias que compartieran fichero se
+ * invalidarian la autenticacion mutuamente. El puerto por defecto conserva el
+ * nombre de siempre.
+ */
+export function tokenFileFor(port: number): string {
+  return port === DEFAULT_PORT ? 'alpha.bridge-token' : `alpha.bridge-token.${port}`;
+}
+
+// dist/bridge-client.js -> repoRoot: tres niveles arriba.
+const tokenPath = path.resolve(__dirname, '..', '..', '..', 'config', tokenFileFor(PORT));
 
 function readToken(): string {
   try {
@@ -30,6 +39,26 @@ function readToken(): string {
   } catch {
     return '';
   }
+}
+
+/**
+ * Saca del buffer las lineas COMPLETAS y devuelve lo que queda a medias.
+ *
+ * TCP no respeta los limites de mensaje: un JSON puede llegar partido en dos
+ * chunks, o dos JSON juntos en uno. Sin conservar el resto, el avatar se comia
+ * mensajes en cuanto el motor mandaba varios seguidos (la lista de voces son
+ * ~120 entradas y no cabe en un chunk).
+ */
+export function takeLines(buffer: string): { lines: string[]; rest: string } {
+  const lines: string[] = [];
+  let rest = buffer;
+  let nl: number;
+  while ((nl = rest.indexOf('\n')) >= 0) {
+    const line = rest.slice(0, nl).trim();
+    rest = rest.slice(nl + 1);
+    if (line) lines.push(line);
+  }
+  return { lines, rest };
 }
 
 /** Perfil de avatar tal como lo manda el motor (el dueno de los perfiles). */
@@ -121,12 +150,9 @@ export function connectBridge(onMessage: (msg: BridgeMessage) => void): BridgeHa
     });
 
     s.on('data', (chunk: Buffer) => {
-      buffer += chunk.toString('utf8');
-      let nl: number;
-      while ((nl = buffer.indexOf('\n')) >= 0) {
-        const line = buffer.slice(0, nl).trim();
-        buffer = buffer.slice(nl + 1);
-        if (!line) continue;
+      const { lines, rest } = takeLines(buffer + chunk.toString('utf8'));
+      buffer = rest;
+      for (const line of lines) {
         try {
           const msg = JSON.parse(line) as BridgeMessage;
           if (msg.type === 'ready') ready = true;

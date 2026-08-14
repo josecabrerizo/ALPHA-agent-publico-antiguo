@@ -88,7 +88,8 @@ test('el avatars.yaml del repo trae los cuatro perfiles y respeta el contrato', 
   for (const a of avatars) {
     assert.ok(a.personality, `${a.id} necesita personalidad: es lo que lo hace un perfil`);
     assert.ok(a.image, `${a.id} necesita imagen`);
-    if (a.local) assert.equal(a.voice.engine, 'sapi', `${a.id} es local y debe usar voz del sistema`);
+    if (a.local)
+      assert.equal(a.voice.engine, 'sapi', `${a.id} es local y debe usar voz del sistema`);
   }
   assert.ok(
     avatars.some((a) => a.local),

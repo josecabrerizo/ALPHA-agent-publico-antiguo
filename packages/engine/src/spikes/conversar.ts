@@ -21,7 +21,11 @@ import { toDbfs } from '../audio/format.js';
 import { loadConfig } from '../config/loader.js';
 import { loadAvatars, type AvatarProfile } from '../config/avatars.js';
 import { ConversationSession, type ConversationState } from '../conversation/session.js';
-import { AvatarBridge, AVATAR_BRIDGE_PORT } from '../conversation/avatar-bridge.js';
+import {
+  AvatarBridge,
+  AVATAR_BRIDGE_PORT,
+  type AlphaConfigMessage,
+} from '../conversation/avatar-bridge.js';
 
 /** Marca de tiempo estilo Java: HH:MM:SS.mmm. */
 function stamp(): string {
@@ -52,7 +56,9 @@ let model = process.env['ALPHA_MODEL'] ?? avatar?.model ?? config.brain.model;
 
 const captureOptions = {
   device: process.env['ALPHA_AUDIO_DEVICE'] ?? config.audio.device,
-  gainDb: process.env['ALPHA_MIC_GAIN'] ? Number(process.env['ALPHA_MIC_GAIN']) : config.audio.gainDb,
+  gainDb: process.env['ALPHA_MIC_GAIN']
+    ? Number(process.env['ALPHA_MIC_GAIN'])
+    : config.audio.gainDb,
   normalize: process.env['ALPHA_MIC_NORMALIZE'] === '1' || config.audio.normalize,
 };
 // device vacio = el predeterminado del sistema; ffmpeg necesita el nombre real.
@@ -87,7 +93,8 @@ const makeBrain = (m: string, conf: boolean, av: AvatarProfile | undefined) =>
   });
 const makeSpeaker = (conf: boolean, av: AvatarProfile | undefined) =>
   createSpeaker({
-    engine: (process.env['ALPHA_TTS_ENGINE'] as 'edge' | 'sapi') ?? av?.voice.engine ?? config.tts.engine,
+    engine:
+      (process.env['ALPHA_TTS_ENGINE'] as 'edge' | 'sapi') ?? av?.voice.engine ?? config.tts.engine,
     edgeVoice: av?.voice.engine === 'edge' ? av.voice.name : config.tts.edgeVoice,
     sapiVoice: av?.voice.engine === 'sapi' ? av.voice.name : config.tts.sapiVoice,
     rate: av?.voice.rate ?? config.tts.rate,
@@ -123,10 +130,26 @@ console.log(
   `  Microfono: ${captureOptions.device}${captureOptions.gainDb ? ` (+${captureOptions.gainDb} dB)` : ''}${config.audio.micEnabled ? '' : '  — SILENCIADO (guardado)'}`,
 );
 console.log(`  Whisper:   modelo ${config.stt.model}, idioma ${config.stt.language}`);
-console.log(`  Cerebro:   ${brainInfo.provider}/${brainInfo.model} ${brainInfo.local ? '(local)' : '(nube)'}`);
-console.log(`  Voz:       ${voiceInfo.engine}/${voiceInfo.voice} ${voiceInfo.local ? '(local)' : '(nube)'}`);
-console.log(`  Herramientas: ${tools.list().map((t) => t.name).join(', ')}`);
-console.log(`  Skills: ${skills.list().map((s) => s.name).join(', ') || '(ninguna)'}`);
+console.log(
+  `  Cerebro:   ${brainInfo.provider}/${brainInfo.model} ${brainInfo.local ? '(local)' : '(nube)'}`,
+);
+console.log(
+  `  Voz:       ${voiceInfo.engine}/${voiceInfo.voice} ${voiceInfo.local ? '(local)' : '(nube)'}`,
+);
+console.log(
+  `  Herramientas: ${tools
+    .list()
+    .map((t) => t.name)
+    .join(', ')}`,
+);
+console.log(
+  `  Skills: ${
+    skills
+      .list()
+      .map((s) => s.name)
+      .join(', ') || '(ninguna)'
+  }`,
+);
 console.log(
   `  Interrupcion: ${config.conversation.bargeIn ? `si (puedes cortarle hablando, desde ${config.conversation.bargeInMinMs}ms de habla)` : 'no'}`,
 );
@@ -143,11 +166,15 @@ console.log(
   bridgeUp
     ? `  Avatar: escuchando en 127.0.0.1:${bridgePort} (lanza "npm run avatar" para verlo)`
     : `  Avatar: PUERTO ${bridgePort} OCUPADO (¿otro motor corriendo?) — este motor no tendra avatar.\n` +
-      `          Para levantar otra instancia: ALPHA_BRIDGE_PORT=43118 npm run spike:conversar`,
+        `          Para levantar otra instancia: ALPHA_BRIDGE_PORT=43118 npm run spike:conversar`,
 );
 console.log(`  Habla cuando quieras. Ctrl+C para salir.\n`);
 
-const ICON: Record<ConversationState, string> = { escuchando: '👂', pensando: '🧠', hablando: '🗣️' };
+const ICON: Record<ConversationState, string> = {
+  escuchando: '👂',
+  pensando: '🧠',
+  hablando: '🗣️',
+};
 
 // Seguimiento del estado actual para el heartbeat: cuanto lleva asi.
 let state: ConversationState = 'escuchando';
@@ -182,7 +209,9 @@ const session = new ConversationSession({
       // Solo en escuchando y como mucho cada segundo, para no inundar.
       if (state === 'escuchando' && now - lastLevelLog > 1000) {
         const db = toDbfs(peak);
-        log(`   micro: pico ${db === -Infinity ? '−∞' : db.toFixed(0)} dBFS${speaking ? '  (voz)' : ''}`);
+        log(
+          `   micro: pico ${db === -Infinity ? '−∞' : db.toFixed(0)} dBFS${speaking ? '  (voz)' : ''}`,
+        );
         peak = 0;
         lastLevelLog = now;
       }
@@ -213,7 +242,10 @@ if (!config.audio.micEnabled) session.setMicEnabled(false);
 // que un avatar se conecta), marcando el activo.
 async function sendDevices(): Promise<void> {
   try {
-    const inputs = (await listInputDevices()).map((d) => ({ name: d.name, isDefault: d.isDefault }));
+    const inputs = (await listInputDevices()).map((d) => ({
+      name: d.name,
+      isDefault: d.isDefault,
+    }));
     bridge.broadcast({ type: 'devices', inputs, current: currentMic });
   } catch (err) {
     log(`✗ [devices] ${(err as Error).message}`);
@@ -248,7 +280,9 @@ const voicesReady = getAvailableVoices()
     if (!config.tts.voiceId) return;
     const saved = availableVoices.find((vo) => vo.id === config.tts.voiceId);
     if (confidential && saved && !saved.local) {
-      log(`⚙️  la voz guardada "${saved.name}" usa la nube y el modo confidencial esta activo — se mantiene la del avatar`);
+      log(
+        `⚙️  la voz guardada "${saved.name}" usa la nube y el modo confidencial esta activo — se mantiene la del avatar`,
+      );
       return;
     }
     try {
@@ -270,19 +304,33 @@ async function sendVoices(): Promise<void> {
   bridge.broadcast({ type: 'voices', list: availableVoices });
 }
 
-bridge.onClientConnect(async () => {
+/** Todo lo que hay que mandarle a un avatar recien autenticado. */
+async function greetClient(): Promise<void> {
   void sendDevices();
   sendAvatars();
   await sendVoices();
+}
+
+// Los manejadores del puente son sincronos (devuelven void): si se les pasa una
+// funcion async, un fallo dentro se convierte en un rechazo que nadie recoge y
+// tumba el proceso. Por eso se llama a la version async y se atrapa aqui.
+bridge.onClientConnect(() => {
+  greetClient().catch((err: unknown) => log(`✗ [avatar] ${(err as Error).message}`));
 });
 void sendDevices();
 
 // Chat escrito desde el avatar: se responde como a la voz, mismo historial.
-bridge.onTextInput((text) => void session.sendText(text));
+bridge.onTextInput((text) => {
+  session.sendText(text).catch((err: unknown) => log(`✗ [texto] ${(err as Error).message}`));
+});
 
 // Cambios de configuracion desde el avatar (modelo, privacidad, microfono): se
 // aplican en caliente sin cortar la sesion.
-bridge.onConfigMessage(async (msg) => {
+bridge.onConfigMessage((msg) => {
+  applyConfig(msg).catch((err: unknown) => log(`✗ [config] ${(err as Error).message}`));
+});
+
+async function applyConfig(msg: AlphaConfigMessage): Promise<void> {
   const s = msg.settings;
 
   // Silenciar el microfono: independiente del resto: sigue valiendo el chat
@@ -325,7 +373,9 @@ bridge.onConfigMessage(async (msg) => {
     }
     // Contrato de privacidad: en confidencial solo avatares locales.
     if (nextConfidential && !candidate.local) {
-      log(`✗ [config] "${candidate.name}" usa la nube y el modo confidencial esta activo — no se aplica`);
+      log(
+        `✗ [config] "${candidate.name}" usa la nube y el modo confidencial esta activo — no se aplica`,
+      );
       return;
     }
     nextAvatar = candidate;
@@ -345,7 +395,11 @@ bridge.onConfigMessage(async (msg) => {
 
   // Un avatar nuevo trae su modelo; si no, manda el que pidan explicitamente.
   const nextModel =
-    nextAvatar !== avatar ? nextAvatar?.model ?? model : s.model && s.model !== model ? s.model : model;
+    nextAvatar !== avatar
+      ? (nextAvatar?.model ?? model)
+      : s.model && s.model !== model
+        ? s.model
+        : model;
 
   if (nextAvatar === avatar && nextModel === model && nextConfidential === confidential) return;
 
@@ -373,7 +427,7 @@ bridge.onConfigMessage(async (msg) => {
     // Falla la validacion: se mantiene la config anterior intacta.
     log(`✗ [config] ${(err as Error).message} — se mantiene la configuracion anterior`);
   }
-});
+}
 
 // Heartbeat: si lleva mas de 3s sin cambiar de estado (y no esta escuchando),
 // avisa de cuanto lleva, para ver un cuelgue en vez de un silencio.

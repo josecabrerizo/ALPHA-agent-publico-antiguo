@@ -1,0 +1,13 @@
+# Finales de linea LF en todas partes.
+#
+# Sin esto, en Windows core.autocrlf deja el arbol de trabajo con CRLF y en
+# Linux con LF, asi que `prettier --check` pasaba o fallaba segun el sistema:
+# la CI multiplataforma habria discutido consigo misma en cada PR.
+* text=auto eol=lf
+
+# Binarios: que git no los toque.
+*.png binary
+*.jpg binary
+*.ico binary
+*.bin binary
+*.wav binary

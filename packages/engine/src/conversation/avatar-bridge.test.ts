@@ -15,7 +15,9 @@ function client(): net.Socket {
   return net.connect(TEST_PORT, '127.0.0.1');
 }
 
-async function withBridge(fn: (bridge: AvatarBridge, token: string) => Promise<void>): Promise<void> {
+async function withBridge(
+  fn: (bridge: AvatarBridge, token: string) => Promise<void>,
+): Promise<void> {
   const bridge = new AvatarBridge(TEST_PORT);
   await bridge.start();
   const token = readFileSync(TEST_TOKEN_PATH, 'utf8').trim();

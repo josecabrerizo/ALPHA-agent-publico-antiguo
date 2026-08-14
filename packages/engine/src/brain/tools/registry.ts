@@ -52,6 +52,16 @@ export class ToolRegistry {
 /** Limite para una herramienta: si su run() se cuelga, no bloquea el turno. */
 const TOOL_TIMEOUT_MS = 30_000;
 
+/** Texto legible de algo lanzado que no es un Error, sin "[object Object]". */
+function describeUnknown(value: unknown): string {
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return 'error desconocido';
+  }
+}
+
 function withTimeout<T>(promise: Promise<T>, ms: number, name: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(
@@ -63,9 +73,11 @@ function withTimeout<T>(promise: Promise<T>, ms: number, name: string): Promise<
         clearTimeout(timer);
         resolve(value);
       },
-      (error) => {
+      (error: unknown) => {
         clearTimeout(timer);
-        reject(error);
+        // Una herramienta puede rechazar con lo que sea (un string, un objeto);
+        // quien lo recoge espera un Error y leeria .message como undefined.
+        reject(error instanceof Error ? error : new Error(describeUnknown(error)));
       },
     );
   });

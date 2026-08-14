@@ -15,23 +15,23 @@ funciona la conversación, pero no todo (ver la tabla).
 MVP conversacional **funcionando de punta a punta**: hablas o escribes al avatar,
 A.L.P.H.A. piensa (con herramientas y skills) y responde con voz. Falta la visión.
 
-| Capa | Windows | Linux |
-|---|---|---|
-| Captura de micrófono (ffmpeg) | ✅ dshow | ✅ pulse |
-| Captura del audio del sistema | ✅ WASAPI loopback | ⬜ falta PipeWire/PulseAudio |
-| VAD por energía | ✅ | ✅ |
-| STT (whisper.cpp) | ✅ | ✅ |
-| Cerebro LLM (compatible-OpenAI: Ollama + nube) | ✅ | ✅ |
-| Voz de nube (msedge-tts) | ✅ | ✅ |
-| Voz local / modo confidencial | ✅ SAPI | ✅ espeak-ng (hay que instalarlo) |
-| Avatar flotante (NodeGui) + menú de configuración | ✅ | ✅ |
-| Interruptor de micrófono (suelta el dispositivo) | ✅ | ✅ |
-| Puente motor↔avatar (TCP local con token) | ✅ | ✅ |
-| Bucle completo escuchar→pensar→hablar | ✅ | ✅ |
-| Chat escrito | ✅ | ✅ |
-| Herramientas (tool-calling) | ✅ | ✅ |
-| Skills (estándar SKILL.md, el agente las crea) | ✅ | ✅ |
-| Visión de pantalla | ⬜ | ⬜ |
+| Capa                                              | Windows            | Linux                             |
+| ------------------------------------------------- | ------------------ | --------------------------------- |
+| Captura de micrófono (ffmpeg)                     | ✅ dshow           | ✅ pulse                          |
+| Captura del audio del sistema                     | ✅ WASAPI loopback | ⬜ falta PipeWire/PulseAudio      |
+| VAD por energía                                   | ✅                 | ✅                                |
+| STT (whisper.cpp)                                 | ✅                 | ✅                                |
+| Cerebro LLM (compatible-OpenAI: Ollama + nube)    | ✅                 | ✅                                |
+| Voz de nube (msedge-tts)                          | ✅                 | ✅                                |
+| Voz local / modo confidencial                     | ✅ SAPI            | ✅ espeak-ng (hay que instalarlo) |
+| Avatar flotante (NodeGui) + menú de configuración | ✅                 | ✅                                |
+| Interruptor de micrófono (suelta el dispositivo)  | ✅                 | ✅                                |
+| Puente motor↔avatar (TCP local con token)         | ✅                 | ✅                                |
+| Bucle completo escuchar→pensar→hablar             | ✅                 | ✅                                |
+| Chat escrito                                      | ✅                 | ✅                                |
+| Herramientas (tool-calling)                       | ✅                 | ✅                                |
+| Skills (estándar SKILL.md, el agente las crea)    | ✅                 | ✅                                |
+| Visión de pantalla                                | ⬜                 | ⬜                                |
 
 El menú de voces del avatar solo enumera voces locales en Windows (SAPI). En
 Linux la voz local es la de espeak-ng y no aparece en esa lista todavía.
@@ -155,6 +155,34 @@ set ALPHA_AUDIO_DEVICE=Headset Microphone (Realtek(R) Audio)
 npm run spike:stt
 ```
 
+## Calidad
+
+```bash
+npm run check      # lo que ejecuta la CI: lint + formato + tipos + tests
+npm run lint       # ESLint (reglas con tipos)
+npm run format     # Prettier, escribiendo
+npm test           # tests de los dos paquetes
+npm run coverage   # cobertura por fichero
+```
+
+La CI (`.github/workflows/ci.yml`) corre `check` en **Windows y Linux** en cada
+PR. Ninguna prueba necesita micrófono, ffmpeg, whisper ni red: el audio es
+sintético y los servicios externos, dobles.
+
+Dos detalles que no son obvios:
+
+- **Los tests también se comprueban de tipos.** Los `tsconfig.json` de cada
+  paquete excluyen los `*.test.ts` para no publicarlos en `dist`, con el efecto
+  colateral de que `tsc --build` nunca los miraba. `tsconfig.check.json` los
+  incluye con `noEmit`, y es además el proyecto que usa ESLint para las reglas
+  que necesitan tipos.
+- **En `eslint.config.js`, las reglas en "error" son las que corresponden a
+  fallos que este proyecto ya ha tenido** — sobre todo promesas sueltas, que
+  aquí son turnos que nadie espera. Lo que solo cambia el aspecto lo decide
+  Prettier, y la familia `no-unsafe-*` está apagada porque lo que entra de fuera
+  (JSON del puente, YAML de configuración) se recibe como `unknown` y se
+  estrecha a mano a propósito.
+
 ## Arquitectura
 
 Monorepo con el cerebro separado de la cara por un contrato explícito:
@@ -171,6 +199,12 @@ packages/
     config/    esquema unificado + carga por capas + perfiles de avatar
   ui-avatar/   App NodeGui: retrato flotante, menú de configuración y chat escrito
 ```
+
+La ventana (Qt) no se puede probar sin levantar Qt, así que lo que sí tiene
+prueba en `ui-avatar` es lo que vive fuera de ella: la validación de los ajustes
+guardados, las tablas de agentes y estados, y el troceado de líneas del puente.
+Por eso `mergeSettings` y `takeLines` son funciones aparte y no código dentro
+del manejador del socket.
 
 El motor no sabe que existe una UI: expone un **puente TCP local** (127.0.0.1,
 con token de sesión) y la app del avatar es un cliente delgado. Esto no es
@@ -238,18 +272,18 @@ avatars:
     name: Nexus
     role: El Guardián de Datos
     personality: Directo y preciso. Vas al grano...
-    local: true                       # solo recursos de la máquina
+    local: true # solo recursos de la máquina
     model: ollama/ornith:9b
-    image: assets/avatars/nexus.png   # cualquier ruta del disco
+    image: assets/avatars/nexus.png # cualquier ruta del disco
     voice: { engine: sapi, name: Microsoft Helena Desktop, rate: -1 }
 ```
 
-| Agente | Avatar | Rol | Privacidad |
-|---|---|---|---|
-| **Vulpis.AI** | Zorro antropomórfico | El Explorador Proactivo | nube |
-| **Unit-A** | Robot / droide | El Asistente Cibernético | **solo local** |
-| **Nexus** | Ser de energía cristalina | El Guardián de Datos | **solo local** |
-| **Synapse** | Espíritu etéreo | La Guía Neural | nube |
+| Agente        | Avatar                    | Rol                      | Privacidad     |
+| ------------- | ------------------------- | ------------------------ | -------------- |
+| **Vulpis.AI** | Zorro antropomórfico      | El Explorador Proactivo  | nube           |
+| **Unit-A**    | Robot / droide            | El Asistente Cibernético | **solo local** |
+| **Nexus**     | Ser de energía cristalina | El Guardián de Datos     | **solo local** |
+| **Synapse**   | Espíritu etéreo           | La Guía Neural           | nube           |
 
 **La privacidad es del avatar, y se cumple sola.** Un perfil `local: true` no
 puede hablar con una voz de nube: si el YAML lo pide, el cargador lo corrige a la

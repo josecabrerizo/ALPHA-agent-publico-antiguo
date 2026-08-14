@@ -87,7 +87,9 @@ function normalize(entry: unknown): AvatarProfile | undefined {
 
   const voice: AvatarVoice = {
     engine: engine as 'edge' | 'sapi',
-    name: str(voiceRaw['name']) ?? (engine === 'sapi' ? DEFAULT_CONFIG.tts.sapiVoice : DEFAULT_CONFIG.tts.edgeVoice),
+    name:
+      str(voiceRaw['name']) ??
+      (engine === 'sapi' ? DEFAULT_CONFIG.tts.sapiVoice : DEFAULT_CONFIG.tts.edgeVoice),
     rate: typeof voiceRaw['rate'] === 'number' ? voiceRaw['rate'] : 0,
   };
 

@@ -15,7 +15,9 @@ import { EspeakSpeaker, findEspeak } from './espeak-speaker.js';
 export function createSpeaker(config: Partial<TtsConfig> = {}): Speaker {
   const cfg = { ...DEFAULT_TTS_CONFIG, ...config };
   const engine = cfg.confidential ? 'sapi' : cfg.engine;
-  return engine === 'sapi' ? createLocalSpeaker(cfg.sapiVoice, cfg.rate) : new EdgeSpeaker(cfg.edgeVoice, cfg.rate);
+  return engine === 'sapi'
+    ? createLocalSpeaker(cfg.sapiVoice, cfg.rate)
+    : new EdgeSpeaker(cfg.edgeVoice, cfg.rate);
 }
 
 /**

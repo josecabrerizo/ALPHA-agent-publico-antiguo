@@ -226,7 +226,8 @@ export class AvatarBridge {
     if (!this.token) return false;
     if (candidate.length !== this.token.length) return false;
     let diff = 0;
-    for (let i = 0; i < candidate.length; i++) diff |= candidate.charCodeAt(i) ^ this.token.charCodeAt(i);
+    for (let i = 0; i < candidate.length; i++)
+      diff |= candidate.charCodeAt(i) ^ this.token.charCodeAt(i);
     return diff === 0;
   }
 

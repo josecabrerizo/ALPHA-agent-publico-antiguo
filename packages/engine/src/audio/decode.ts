@@ -38,11 +38,7 @@ export async function decodeToPcm(filePath: string): Promise<Buffer> {
     });
 
     ffmpeg.on('error', (error: NodeJS.ErrnoException) => {
-      reject(
-        error.code === 'ENOENT'
-          ? new Error('No se encontro ffmpeg en el PATH.')
-          : error,
-      );
+      reject(error.code === 'ENOENT' ? new Error('No se encontro ffmpeg en el PATH.') : error);
     });
 
     ffmpeg.on('close', (code) => {

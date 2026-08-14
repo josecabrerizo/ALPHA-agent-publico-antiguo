@@ -78,7 +78,10 @@ class FakeWhisper {
   calls = 0;
   private pending: ((text: string) => void)[] = [];
 
-  async transcribe(_pcm: Buffer, _opts: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<string> {
+  async transcribe(
+    _pcm: Buffer,
+    _opts: { signal?: AbortSignal; timeoutMs?: number } = {},
+  ): Promise<string> {
     this.calls++;
     return new Promise<string>((resolve) => this.pending.push(resolve));
   }

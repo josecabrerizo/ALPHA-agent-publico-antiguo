@@ -28,16 +28,22 @@ const MAX_HISTORY_MESSAGES = 24;
 /** Estado del asistente, el mismo eje que las animaciones del avatar. */
 export type ConversationState = 'escuchando' | 'pensando' | 'hablando';
 
+/**
+ * Se declaran como PROPIEDADES de tipo funcion, no como metodos: son callbacks
+ * sueltos que se pasan de un sitio a otro (onLevel viaja hasta el VAD), y la
+ * forma de metodo promete un `this` que aqui no existe. De paso, TypeScript
+ * comprueba sus parametros de forma estricta en vez de bivariante.
+ */
 export interface ConversationCallbacks {
-  onState?(state: ConversationState): void;
-  onUserText?(text: string): void;
-  onAssistantText?(text: string): void;
-  onLevel?(level: number, speaking: boolean): void;
-  onError?(where: string, error: Error): void;
+  onState?: (state: ConversationState) => void;
+  onUserText?: (text: string) => void;
+  onAssistantText?: (text: string) => void;
+  onLevel?: (level: number, speaking: boolean) => void;
+  onError?: (where: string, error: Error) => void;
   /** Traza con tiempos de cada fase del turno, para depurar y medir latencias. */
-  onLog?(message: string): void;
+  onLog?: (message: string) => void;
   /** El microfono se ha silenciado o reactivado. */
-  onMicChange?(enabled: boolean): void;
+  onMicChange?: (enabled: boolean) => void;
 }
 
 export interface ConversationDeps {

@@ -13,8 +13,7 @@ const capture_opts = await captureOptionsFromEnv();
 // Un prompt corto en espanol correcto ancla el idioma y la ortografia; whisper
 // lo trata como lo dicho justo antes. ALPHA_STT_PROMPT lo sobrescribe.
 const initialPrompt =
-  process.env['ALPHA_STT_PROMPT'] ??
-  'Conversacion en espanol con el asistente A.L.P.H.A.';
+  process.env['ALPHA_STT_PROMPT'] ?? 'Conversacion en espanol con el asistente A.L.P.H.A.';
 const beamSize = Number(process.env['ALPHA_STT_BEAM'] ?? 5);
 const transcriber = new WhisperTranscriber({
   language: process.env['ALPHA_LANG'] ?? 'es',

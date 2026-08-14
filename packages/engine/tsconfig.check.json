@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // Comprobacion, sin emitir: como tsconfig.json pero CON los *.test.ts.
+  //
+  // El de compilar los excluye para no publicarlos en dist, con el efecto
+  // colateral de que `tsc --build` nunca los miraba: podia colarse un test que
+  // no compilaba y solo se veia al ejecutarlo. Es tambien el proyecto que usa
+  // ESLint para las reglas que necesitan tipos.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": []
+}

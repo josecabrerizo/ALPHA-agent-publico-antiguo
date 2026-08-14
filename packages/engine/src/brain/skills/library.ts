@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { loadSkills } from './loader.js';
 import type { Skill, SkippedSkill } from './types.js';
-import type { Tool } from '../tools/types.js';
+import { textArg, type Tool } from '../tools/types.js';
 
 /**
  * Biblioteca de skills: las carga del disco, arma la seccion del prompt que le
@@ -63,10 +63,13 @@ export class SkillLibrary {
         required: ['nombre'],
       },
       run: async (args) => {
-        const nombre = String(args['nombre'] ?? '').trim();
+        const nombre = textArg(args, 'nombre');
         const skill = this.skills.get(nombre);
         if (!skill) {
-          const disponibles = this.list().map((s) => s.name).join(', ') || '(ninguna)';
+          const disponibles =
+            this.list()
+              .map((s) => s.name)
+              .join(', ') || '(ninguna)';
           return `No existe la skill "${nombre}". Disponibles: ${disponibles}.`;
         }
         return `Instrucciones de la skill "${skill.name}":\n\n${skill.body}`;
@@ -81,7 +84,9 @@ export class SkillLibrary {
       parameters: { type: 'object', properties: {} },
       run: async () => {
         if (this.skills.size === 0) return 'No hay skills disponibles todavia.';
-        return this.list().map((s) => `- ${s.name}: ${s.description}`).join('\n');
+        return this.list()
+          .map((s) => `- ${s.name}: ${s.description}`)
+          .join('\n');
       },
     };
   }
@@ -103,9 +108,9 @@ export class SkillLibrary {
         required: ['nombre', 'descripcion', 'contenido'],
       },
       run: async (args) => {
-        const slug = slugify(String(args['nombre'] ?? ''));
-        const descripcion = String(args['descripcion'] ?? '').trim();
-        const contenido = String(args['contenido'] ?? '').trim();
+        const slug = slugify(textArg(args, 'nombre'));
+        const descripcion = textArg(args, 'descripcion');
+        const contenido = textArg(args, 'contenido');
         if (!slug) return 'Nombre de skill invalido.';
         if (!descripcion || !contenido) return 'Faltan la descripcion o el contenido.';
 

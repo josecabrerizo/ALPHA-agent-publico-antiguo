@@ -11,5 +11,7 @@
     "rootDir": "./src",
     "outDir": "./dist"
   },
-  "include": ["src/**/*.ts"]
+  // Los tests no se publican en dist; los comprueba tsconfig.check.json.
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
 }

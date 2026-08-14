@@ -7,17 +7,16 @@ const { RtAudio } = audify;
 
 // audify declara RtAudioApi/RtAudioFormat como `const enum` NO exportados:
 // invisibles para TS (y ademas chocan con verbatimModuleSyntax). Pero en
-// runtime son objetos reales. Se leen de ahi y se castean al tipo exacto que
-// espera cada parametro de RtAudio, que si es publico, en vez de fijar numeros
-// magicos que se romperian si audify los renumera.
+// runtime son objetos reales. Se leen de ahi, en vez de fijar numeros magicos
+// que se romperian si audify los renumera. El de la API necesita ademas el tipo
+// exacto que espera el constructor, que si es publico.
 type ApiArg = ConstructorParameters<typeof RtAudio>[0];
-type FormatArg = Parameters<InstanceType<typeof RtAudio>['openStream']>[2];
 const rtEnums = audify as unknown as {
   RtAudioApi: { WINDOWS_WASAPI: number };
   RtAudioFormat: { RTAUDIO_SINT16: number };
 };
 const WASAPI = rtEnums.RtAudioApi.WINDOWS_WASAPI as ApiArg;
-const SINT16 = rtEnums.RtAudioFormat.RTAUDIO_SINT16 as FormatArg;
+const SINT16 = rtEnums.RtAudioFormat.RTAUDIO_SINT16;
 
 /**
  * SOLO WINDOWS. Todo este modulo abre el mezclador por WASAPI loopback, que es
@@ -103,7 +102,9 @@ export function captureSystemAudio(options: LoopbackOptions = {}): CaptureHandle
   });
   ffmpeg.on('close', (code) => {
     if (code !== 0 && code !== null && !ffmpeg.stdout.destroyed) {
-      ffmpeg.stdout.destroy(new Error(`ffmpeg (resample) fallo (codigo ${code}): ${stderr.trim()}`));
+      ffmpeg.stdout.destroy(
+        new Error(`ffmpeg (resample) fallo (codigo ${code}): ${stderr.trim()}`),
+      );
     }
   });
 
@@ -144,7 +145,10 @@ export function captureSystemAudio(options: LoopbackOptions = {}): CaptureHandle
 
 type RtDevice = ReturnType<InstanceType<typeof RtAudio>['getDevices']>[number];
 
-function pickOutputDevice(rtaudio: InstanceType<typeof RtAudio>, name: string | undefined): RtDevice {
+function pickOutputDevice(
+  rtaudio: InstanceType<typeof RtAudio>,
+  name: string | undefined,
+): RtDevice {
   const devices = rtaudio.getDevices().filter((d) => d.outputChannels > 0);
   if (devices.length === 0) {
     throw new Error('No hay ningun dispositivo de salida para capturar por loopback.');

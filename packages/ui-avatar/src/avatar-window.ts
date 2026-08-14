@@ -17,6 +17,7 @@ import {
   AspectRatioMode,
   TransformationMode,
 } from '@nodegui/nodegui';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { AvatarOption, VoiceOption } from './bridge-client.js';
 import { log } from './log.js';
@@ -248,14 +249,12 @@ export class AvatarWindow {
     // Soporta PNG y SVG: intenta SVG primero, luego PNG como fallback.
     const basePath = path.resolve(__dirname, '..', '..', '..', 'assets', 'avatars', id);
     const svgPath = `${basePath}.svg`;
-    const pngPath = `${basePath}.png`;
     try {
-      const { existsSync } = require('node:fs');
       if (existsSync(svgPath)) return svgPath;
     } catch {
       // Si falla la busqueda de SVG, usa PNG.
     }
-    return pngPath;
+    return `${basePath}.png`;
   }
 
   /**
@@ -270,7 +269,9 @@ export class AvatarWindow {
       this.portrait.hide();
       this.paintOrb();
       this.layoutVisual();
-      log(`retrato de "${this.settings.agent}" no disponible (${file || 'sin ruta'}); se usa el orbe`);
+      log(
+        `retrato de "${this.settings.agent}" no disponible (${file || 'sin ruta'}); se usa el orbe`,
+      );
       return;
     }
     const scaled = pixmap.scaled(
@@ -285,7 +286,9 @@ export class AvatarWindow {
     this.paintOrb();
     this.layoutVisual();
     const isSvg = file.endsWith('.svg');
-    log(`retrato: ${this.settings.agent} (${scaled.width()}×${scaled.height()})${isSvg ? ' [SVG animado]' : ''}`);
+    log(
+      `retrato: ${this.settings.agent} (${scaled.width()}×${scaled.height()})${isSvg ? ' [SVG animado]' : ''}`,
+    );
   }
 
   /** Bocadillo de texto bajo el orbe. Oculto hasta que llega algo que decir. */
@@ -444,7 +447,11 @@ export class AvatarWindow {
     this.onSettingsChanged?.(this.settings);
   }
 
-  private action(text: string, onTrigger: () => void, opts: { checked?: boolean; enabled?: boolean } = {}): QAction {
+  private action(
+    text: string,
+    onTrigger: () => void,
+    opts: { checked?: boolean; enabled?: boolean } = {},
+  ): QAction {
     const a = new QAction();
     a.setText(text);
     if (opts.checked !== undefined) {
@@ -464,9 +471,13 @@ export class AvatarWindow {
     this.menuRefs = [menu];
 
     const active = this.avatars.find((a) => a.id === this.settings.agent);
-    const title = this.action(`A.L.P.H.A. — ${active?.name ?? AGENTS[this.settings.agent].label}`, () => {}, {
-      enabled: false,
-    });
+    const title = this.action(
+      `A.L.P.H.A. — ${active?.name ?? AGENTS[this.settings.agent].label}`,
+      () => {},
+      {
+        enabled: false,
+      },
+    );
     menu.addAction(title);
     menu.addSeparator();
 
@@ -522,9 +533,7 @@ export class AvatarWindow {
     const voiceMenu = addSubmenu(menu, 'Voz del avatar');
     this.menuRefs.push(voiceMenu);
     if (this.voices.length === 0) {
-      voiceMenu.addAction(
-        this.action('(enumerando voces...)', () => {}, { enabled: false }),
-      );
+      voiceMenu.addAction(this.action('(enumerando voces...)', () => {}, { enabled: false }));
     } else {
       // Buscar la voz del avatar actual o la guardada en settings
       const currentVoiceId = this.settings.voiceId;

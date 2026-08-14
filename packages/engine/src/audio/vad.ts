@@ -64,7 +64,7 @@ export async function* detectUtterances(
   let preRollFramesInCurrent = 0;
 
   for await (const chunk of source) {
-    let data = leftover.length > 0 ? Buffer.concat([leftover, chunk]) : chunk;
+    const data = leftover.length > 0 ? Buffer.concat([leftover, chunk]) : chunk;
 
     let offset = 0;
     while (offset + FRAME_BYTES <= data.length) {

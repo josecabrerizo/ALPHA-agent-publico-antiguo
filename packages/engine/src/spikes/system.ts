@@ -23,7 +23,9 @@ console.log(`\n  Capturando la salida predeterminada. Pon algo a sonar. Ctrl+C p
 
 const capture = captureSystemAudio({
   ...(gainDb ? { gainDb } : {}),
-  ...(process.env['ALPHA_OUTPUT_DEVICE'] ? { outputDeviceName: process.env['ALPHA_OUTPUT_DEVICE'] } : {}),
+  ...(process.env['ALPHA_OUTPUT_DEVICE']
+    ? { outputDeviceName: process.env['ALPHA_OUTPUT_DEVICE'] }
+    : {}),
 });
 capture.pcm.setMaxListeners(0);
 

@@ -42,18 +42,14 @@ export class SapiSpeaker implements Speaker {
       '$s.Dispose()',
     ].join('; ');
 
-    const ps = spawn(
-      'powershell',
-      ['-NoProfile', '-NonInteractive', '-Command', script],
-      {
-        stdio: ['pipe', 'ignore', 'ignore'],
-        env: {
-          ...process.env,
-          ALPHA_SAPI_VOICE: this.voice,
-          ALPHA_SAPI_RATE: String(Math.max(-10, Math.min(10, Math.round(this.rate)))),
-        },
+    const ps = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], {
+      stdio: ['pipe', 'ignore', 'ignore'],
+      env: {
+        ...process.env,
+        ALPHA_SAPI_VOICE: this.voice,
+        ALPHA_SAPI_RATE: String(Math.max(-10, Math.min(10, Math.round(this.rate)))),
       },
-    );
+    });
     this.proc = ps;
 
     ps.stdin?.end(clean, 'utf8');
@@ -61,9 +57,7 @@ export class SapiSpeaker implements Speaker {
     await new Promise<void>((resolve, reject) => {
       ps.on('error', (err: NodeJS.ErrnoException) => {
         reject(
-          err.code === 'ENOENT'
-            ? new Error('No se encontro PowerShell para la voz SAPI.')
-            : err,
+          err.code === 'ENOENT' ? new Error('No se encontro PowerShell para la voz SAPI.') : err,
         );
       });
       ps.on('close', () => {

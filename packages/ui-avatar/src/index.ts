@@ -52,7 +52,9 @@ const bridge = connectBridge((msg) => {
 // de control. (Si el motor no esta conectado, lo leera del fichero al arrancar.)
 avatar.setOnSettingsChanged((settings) => {
   bridge.send({ type: 'config', settings });
-  log(`config → motor: agente=${settings.agent}, modelo=${settings.model}, confidencial=${settings.confidential}, micro=${settings.audioDevice || '(sistema)'}`);
+  log(
+    `config → motor: agente=${settings.agent}, modelo=${settings.model}, confidencial=${settings.confidential}, micro=${settings.audioDevice || '(sistema)'}`,
+  );
 });
 
 // Chat escrito: Enter en el campo del avatar manda el texto al motor.

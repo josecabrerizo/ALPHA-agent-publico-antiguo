@@ -38,7 +38,14 @@ jobs:
       - name: Instalar dependencias
         run: npm ci
 
-      # tsc --build + los tests de todos los paquetes. Ninguno necesita micro,
-      # ffmpeg, whisper ni red: el audio es sintetico y los servicios, dobles.
-      - name: Compilar y probar
+      # lint + formato + tipos (con los tests incluidos) + tests de todos los
+      # paquetes. Ninguno necesita micro, ffmpeg, whisper ni red: el audio es
+      # sintetico y los servicios, dobles.
+      - name: Comprobar
         run: npm run check
+
+      # Informativo: no hay umbral que romper la build. Un umbral pide antes
+      # decidir que numero es honesto para un proyecto con tanta E/S de sistema
+      # como este, y un numero puesto a ojo solo ensena a saltarselo.
+      - name: Cobertura
+        run: npm run coverage

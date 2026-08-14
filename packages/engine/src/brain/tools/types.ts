@@ -26,8 +26,24 @@ export interface Tool {
    * Las de solo lectura (hora, leer pantalla) van a false.
    */
   destructive?: boolean;
-  /** Ejecuta la herramienta. `args` ya viene parseado y validado por forma. */
+  /**
+   * Ejecuta la herramienta. `args` viene del JSON que produce el MODELO: esta
+   * parseado, pero sus valores pueden ser cualquier cosa aunque el esquema pida
+   * un string. Para leer texto, `textArg`.
+   */
   run(args: Record<string, unknown>, ctx: ToolContext): Promise<string>;
+}
+
+/**
+ * Lee un argumento de texto. Sin esto, `String(args['nombre'])` convertia un
+ * objeto en "[object Object]" y seguia adelante como si fuera un nombre valido:
+ * el modelo alucina formas, no solo contenidos.
+ */
+export function textArg(args: Record<string, unknown>, name: string): string {
+  const value = args[name];
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return '';
 }
 
 /** Forma OpenAI de una herramienta, para mandarsela al modelo. */

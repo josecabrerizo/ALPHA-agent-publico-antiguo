@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { DEFAULT_AGENT, type AgentId } from './agents.js';
+import { AGENT_ORDER, DEFAULT_AGENT, type AgentId } from './agents.js';
 
 /**
  * Configuracion en vivo del asistente, editable desde el menu del avatar y
@@ -22,7 +22,7 @@ export interface Settings {
   voiceId: string;
 }
 
-const DEFAULTS: Settings = {
+export const DEFAULT_SETTINGS: Settings = {
   agent: DEFAULT_AGENT,
   model: 'ollama/gemma4:12b',
   confidential: false,
@@ -35,14 +35,42 @@ const DEFAULTS: Settings = {
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const settingsPath = path.join(repoRoot, 'config', 'alpha.settings.json');
 
+/**
+ * Fusiona lo leido del disco con los defaults, CAMPO A CAMPO y comprobando el
+ * tipo de cada uno.
+ *
+ * El `{ ...DEFAULTS, ...JSON.parse(raw) }` de antes se fiaba del fichero: un
+ * `{"agent": 42}` (o un agente que ya no existe) entraba tal cual, y la ventana
+ * reventaba al buscar su color en AGENTS. El fichero lo escribe el avatar, pero
+ * tambien puede editarlo una persona o quedarse a medias en un apagon.
+ *
+ * Es una funcion aparte, sin disco, para poder probarla sin pisar la
+ * configuracion de verdad de quien ejecute los tests.
+ */
+export function mergeSettings(raw: unknown): Settings {
+  if (!raw || typeof raw !== 'object') return { ...DEFAULT_SETTINGS };
+  const v = raw as Record<string, unknown>;
+  const str = (key: keyof Settings, fallback: string): string =>
+    typeof v[key] === 'string' ? v[key] : fallback;
+  const bool = (key: keyof Settings, fallback: boolean): boolean =>
+    typeof v[key] === 'boolean' ? v[key] : fallback;
+  return {
+    agent: AGENT_ORDER.includes(v['agent'] as AgentId)
+      ? (v['agent'] as AgentId)
+      : DEFAULT_SETTINGS.agent,
+    model: str('model', DEFAULT_SETTINGS.model),
+    confidential: bool('confidential', DEFAULT_SETTINGS.confidential),
+    audioDevice: str('audioDevice', DEFAULT_SETTINGS.audioDevice),
+    micEnabled: bool('micEnabled', DEFAULT_SETTINGS.micEnabled),
+    voiceId: str('voiceId', DEFAULT_SETTINGS.voiceId),
+  };
+}
+
 export function loadSettings(): Settings {
   try {
-    const raw = readFileSync(settingsPath, 'utf8');
-    // Se fusiona con los defaults: un fichero viejo al que le falten claves
-    // nuevas no rompe.
-    return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<Settings>) };
+    return mergeSettings(JSON.parse(readFileSync(settingsPath, 'utf8')));
   } catch {
-    return { ...DEFAULTS };
+    return { ...DEFAULT_SETTINGS };
   }
 }
 

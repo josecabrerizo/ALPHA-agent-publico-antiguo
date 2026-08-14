@@ -21,16 +21,26 @@
     "avatar": "npm run dev --workspace @alpha/ui-avatar",
     "devices": "npm run devices --workspace @alpha/engine",
     "test": "npm run test --workspaces --if-present",
-    "typecheck": "tsc --build",
-    "check": "tsc --build && npm run test --workspaces --if-present",
+    "coverage": "npm run coverage --workspaces --if-present",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --build && tsc -p packages/engine/tsconfig.check.json && tsc -p packages/ui-avatar/tsconfig.check.json",
+    "check": "npm run lint && npm run format:check && npm run typecheck && npm test",
     "mic-check": "npm run mic-check --workspace @alpha/engine",
     "spike:tts": "npm run spike:tts --workspace @alpha/engine --",
     "spike:conversar": "npm run spike:conversar --workspace @alpha/engine",
     "spike:agente": "npm run spike:agente --workspace @alpha/engine"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.10.2",
+    "eslint": "^10.8.1",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.6",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.67.0"
   }
 }
