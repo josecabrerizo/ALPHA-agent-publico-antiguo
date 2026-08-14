@@ -1,0 +1,44 @@
+name: CI
+
+# Compilar y pasar los tests en los DOS sistemas que el README promete. Hasta
+# ahora no habia CI ordinaria: la unica automatizacion eran los agentes, asi que
+# un fallo de compilacion podia entrar en master sin que nada lo detectara.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+# Un PR que recibe varios pushes seguidos no necesita terminar las ejecuciones
+# viejas.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      # Fijadas por SHA: un tag movil se puede reapuntar a otro commit.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      # tsc --build + los tests de todos los paquetes. Ninguno necesita micro,
+      # ffmpeg, whisper ni red: el audio es sintetico y los servicios, dobles.
+      - name: Compilar y probar
+        run: npm run check

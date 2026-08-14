@@ -18,7 +18,12 @@ avatar.show();
 // Conexion con el motor: refleja el estado de la conversacion en el orbe y
 // muestra el ultimo texto. Si el motor no esta, reintenta hasta que aparezca.
 const bridge = connectBridge((msg) => {
-  if (msg.type === 'state') {
+  if (msg.type === 'ready') {
+    // No se reenvia la config: el motor lee el mismo alpha.settings.json al
+    // arrancar y ademas puede tener overrides propios (ALPHA_CONFIDENCIAL). Lo
+    // que manda es lo que el motor diga que tiene puesto.
+    log('motor autenticado: el avatar ya manda y recibe');
+  } else if (msg.type === 'state') {
     avatar.setState(msg.state);
     log(`estado: ${msg.state}`);
   } else if (msg.type === 'user') {
@@ -52,10 +57,13 @@ avatar.setOnSettingsChanged((settings) => {
 
 // Chat escrito: Enter en el campo del avatar manda el texto al motor.
 avatar.setOnTextSubmit((text) => {
-  avatar.showCaption(`tú: ${text}`);
-  if (bridge.sendText(text)) log(`texto → motor: ${text}`);
-  else {
-    log('no hay motor conectado; el mensaje escrito no se envió');
+  // Solo se pinta como enviado si el motor lo ha aceptado de verdad (handshake
+  // acusado); si no, el usuario veria su mensaje en pantalla y nadie lo leeria.
+  if (bridge.sendText(text)) {
+    avatar.showCaption(`tú: ${text}`);
+    log(`texto → motor: ${text}`);
+  } else {
+    log('el motor no está conectado/autenticado; el mensaje escrito no se envió');
     avatar.showCaption('(sin motor: arranca "npm run spike:conversar")');
   }
 });

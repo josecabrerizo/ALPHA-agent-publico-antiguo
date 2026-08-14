@@ -23,8 +23,10 @@ config/local.yaml
 # Configuracion en vivo del asistente (la edita el menu del avatar)
 config/alpha.settings.json
 
-# Token de sesion del puente motor<->avatar (uno nuevo por arranque)
-config/alpha.bridge-token
+# Token de sesion del puente motor<->avatar (uno nuevo por arranque). Hay uno
+# por puerto: alpha.bridge-token.43118 para una segunda instancia, y el .tmp
+# intermedio del reemplazo atomico si algo se corta a mitad.
+config/alpha.bridge-token*
 
 .DS_Store
 Thumbs.db

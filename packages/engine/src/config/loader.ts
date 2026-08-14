@@ -2,19 +2,26 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { repoRoot } from '../paths.js';
-import { DEFAULT_CONFIG, CONFIG_VERSION, type AlphaConfig } from './schema.js';
+import { DEFAULT_CONFIG, CONFIG_VERSION, STT_MODELS, type AlphaConfig } from './schema.js';
 
 const configDir = path.join(repoRoot, 'config');
 const defaultYamlPath = path.join(configDir, 'default.yaml');
 const localYamlPath = path.join(configDir, 'local.yaml');
 const settingsPath = path.join(configDir, 'alpha.settings.json');
 
-/** Ajustes en vivo que escribe el menu del avatar. */
+/**
+ * Ajustes en vivo que escribe el menu del avatar. Tiene que cubrir TODO lo que
+ * la UI guarda: lo que falte aqui se escribe en disco y no se lee nunca, que es
+ * lo que hacia que el mute del microfono y la voz elegida se perdieran al
+ * reiniciar aunque el fichero los tuviera.
+ */
 interface RuntimeSettings {
   agent?: string;
   model?: string;
   confidential?: boolean;
   audioDevice?: string;
+  micEnabled?: boolean;
+  voiceId?: string;
 }
 
 /**
@@ -73,6 +80,8 @@ function applyRuntimeSettings(config: AlphaConfig, s: RuntimeSettings): AlphaCon
   if (typeof s.model === 'string') config.brain.model = s.model;
   if (typeof s.confidential === 'boolean') config.confidential = s.confidential;
   if (typeof s.audioDevice === 'string') config.audio.device = s.audioDevice;
+  if (typeof s.micEnabled === 'boolean') config.audio.micEnabled = s.micEnabled;
+  if (typeof s.voiceId === 'string') config.tts.voiceId = s.voiceId;
   return config;
 }
 
@@ -95,7 +104,22 @@ function validate(config: AlphaConfig): void {
   if (config.tts.engine !== 'edge' && config.tts.engine !== 'sapi') {
     config.tts.engine = DEFAULT_CONFIG.tts.engine;
   }
+  if (typeof config.tts.voiceId !== 'string') config.tts.voiceId = DEFAULT_CONFIG.tts.voiceId;
   if (!Number.isFinite(config.audio.gainDb)) config.audio.gainDb = 0;
+  if (typeof config.audio.micEnabled !== 'boolean') {
+    config.audio.micEnabled = DEFAULT_CONFIG.audio.micEnabled;
+  }
+  // Un tamano inventado se convertiria en la ruta de un modelo que no existe y
+  // el fallo saldria mucho despues, al primer intento de transcribir.
+  if (!STT_MODELS.includes(config.stt.model)) {
+    console.error(
+      `Configuracion: stt.model "${config.stt.model}" no es ${STT_MODELS.join(' | ')}; se usa "${DEFAULT_CONFIG.stt.model}".`,
+    );
+    config.stt.model = DEFAULT_CONFIG.stt.model;
+  }
+  if (!config.stt.language || typeof config.stt.language !== 'string') {
+    config.stt.language = DEFAULT_CONFIG.stt.language;
+  }
 }
 
 /** Fusion profunda: los objetos planos se mezclan; arrays y primitivos reemplazan. */

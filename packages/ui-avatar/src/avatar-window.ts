@@ -20,7 +20,7 @@ import {
 import path from 'node:path';
 import type { AvatarOption, VoiceOption } from './bridge-client.js';
 import { log } from './log.js';
-import { STATE_CYCLE, MAX_PULSE, type AvatarState } from './states.js';
+import { STATE_CYCLE, STATE_RHYTHMS, MAX_PULSE, type AvatarState } from './states.js';
 import { AGENTS, AGENT_ORDER, type AgentId } from './agents.js';
 import { loadSettings, saveSettings, MODEL_OPTIONS, type Settings } from './settings.js';
 
@@ -130,8 +130,16 @@ export class AvatarWindow {
     this.win.show();
   }
 
+  /**
+   * Cambia el estado y REPINTA. Guardarlo sin mas dejaba escuchar/pensar/hablar
+   * indistinguibles en pantalla: el halo crece y se enciende segun el estado
+   * (la amplitud de STATE_RHYTHMS, ahora como tamano fijo en vez de latido).
+   */
   setState(state: AvatarState): void {
+    if (state === this.state) return;
     this.state = state;
+    this.paintOrb();
+    this.layoutVisual();
   }
 
   /** Registra quien recibe los cambios de config (para mandarlos al motor). */
@@ -223,12 +231,7 @@ export class AvatarWindow {
    */
   private setupPortrait(): void {
     this.portrait.setParent(this.root);
-    // Las animaciones requieren CSS: inyecta las keyframes al estilo inline.
-    // La imagen se estira al tamano de la etiqueta; como las animaciones escalan
-    // ancho y alto por el mismo factor, la proporcion no se deforma.
-    this.portrait.setInlineStyle(
-      `background: transparent; ${ANIMATIONS.reposo} transition: all 0.5s ease-in-out;`,
-    );
+    this.portrait.setInlineStyle('background: transparent;');
     this.portrait.setScaledContents(true);
     this.portrait.hide();
   }
@@ -355,19 +358,32 @@ export class AvatarWindow {
   }
 
   /**
+   * Intensidad del halo segun el estado, en 0..1. Sale de la amplitud del
+   * pulso: el estado mas "nervioso" es tambien el que mas se enciende, asi que
+   * la escala ya estaba definida en states.ts y no hay una segunda verdad.
+   */
+  private stateGlow(): number {
+    return STATE_RHYTHMS[this.state].pulse / MAX_PULSE;
+  }
+
+  /**
    * Estilo del orbe con el color del agente activo. Con retrato pasa a ser un
-   * halo tenue detras del personaje; sin el, es la cara del asistente.
+   * halo tenue detras del personaje; sin el, es la cara del asistente. El
+   * ESTADO modula cuanto se enciende (ver stateGlow).
    */
   private paintOrb(): void {
     const [r, g, b] = AGENTS[this.settings.agent].color;
     const lighten = (c: number) => Math.min(255, c + 45);
     const darken = (c: number) => Math.round(c * 0.5);
+    // Reposo no se apaga del todo (0.6) o el avatar pareceria desconectado.
+    const glow = 0.6 + 0.4 * this.stateGlow();
+    const a = (alpha: number) => Math.round(alpha * glow);
     if (this.portraitBase) {
       this.orb.setInlineStyle(`
         background: qradialgradient(
           cx: 0.5, cy: 0.5, radius: 0.5, fx: 0.5, fy: 0.5,
-          stop: 0 rgba(${lighten(r)}, ${lighten(g)}, ${lighten(b)}, 110),
-          stop: 0.6 rgba(${r}, ${g}, ${b}, 55),
+          stop: 0 rgba(${lighten(r)}, ${lighten(g)}, ${lighten(b)}, ${a(110)}),
+          stop: 0.6 rgba(${r}, ${g}, ${b}, ${a(55)}),
           stop: 1 rgba(${darken(r)}, ${darken(g)}, ${darken(b)}, 0)
         );
         border-radius: ${CIRCLE_RADIUS}px;
@@ -378,12 +394,12 @@ export class AvatarWindow {
       background: qradialgradient(
         cx: 0.5, cy: 0.42, radius: 0.75,
         fx: 0.5, fy: 0.42,
-        stop: 0 rgba(${lighten(r)}, ${lighten(g)}, ${lighten(b)}, 245),
-        stop: 0.55 rgba(${r}, ${g}, ${b}, 225),
-        stop: 1 rgba(${darken(r)}, ${darken(g)}, ${darken(b)}, 90)
+        stop: 0 rgba(${lighten(r)}, ${lighten(g)}, ${lighten(b)}, ${a(245)}),
+        stop: 0.55 rgba(${r}, ${g}, ${b}, ${a(225)}),
+        stop: 1 rgba(${darken(r)}, ${darken(g)}, ${darken(b)}, ${a(90)})
       );
       border-radius: ${CIRCLE_RADIUS}px;
-      border: 2px solid rgba(255, 255, 255, 60);
+      border: 2px solid rgba(255, 255, 255, ${a(60) + 20});
     `);
   }
 
@@ -577,15 +593,17 @@ export class AvatarWindow {
   }
 
   /**
-   * Coloca retrato y halo. Es estatico a proposito: la respiracion sinusoidal
-   * anterior se ha quitado y el dinamismo se replanteara mas adelante.
+   * Coloca retrato y halo. Sin animacion (la respiracion sinusoidal se quito y
+   * el dinamismo se replanteara), pero el TAMANO del halo depende del estado:
+   * es lo que hace distinguibles escuchando, pensando y hablando de un vistazo.
    */
   private layoutVisual(): void {
+    const radius = BASE_RADIUS + STATE_RHYTHMS[this.state].pulse;
     this.orb.setGeometry(
-      Math.round(ORB_CX - BASE_RADIUS),
-      Math.round(ORB_CY - BASE_RADIUS),
-      BASE_RADIUS * 2,
-      BASE_RADIUS * 2,
+      Math.round(ORB_CX - radius),
+      Math.round(ORB_CY - radius),
+      radius * 2,
+      radius * 2,
     );
     if (!this.portraitBase) return;
     // Anclado por abajo: los pies del personaje quedan al ras del bocadillo.

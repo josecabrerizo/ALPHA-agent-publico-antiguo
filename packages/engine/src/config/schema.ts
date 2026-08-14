@@ -21,11 +21,21 @@ export interface AudioConfig {
   gainDb: number;
   /** Normalizacion dinamica (dynaudnorm). */
   normalize: boolean;
+  /**
+   * Escucha activa. false = ni siquiera se abre la captura, asi que el
+   * indicador de microfono del sistema queda apagado. Se persiste: un mute
+   * que se olvidara al reiniciar seria una promesa de privacidad a medias.
+   */
+  micEnabled: boolean;
 }
+
+/** Tamanos de modelo whisper que el proyecto sabe descargar y usar. */
+export const STT_MODELS = ['base', 'small', 'medium'] as const;
+export type SttModel = (typeof STT_MODELS)[number];
 
 export interface SttConfig {
   /** Tamano del modelo whisper: base | small | medium. */
-  model: string;
+  model: SttModel;
   /** Idioma ISO ('es') o 'auto'. */
   language: string;
 }
@@ -60,7 +70,7 @@ export const DEFAULT_CONFIG: AlphaConfig = {
   version: CONFIG_VERSION,
   confidential: false,
   agent: 'unit-a',
-  audio: { device: '', gainDb: 0, normalize: false },
+  audio: { device: '', gainDb: 0, normalize: false, micEnabled: true },
   stt: { model: 'small', language: 'es' },
   conversation: { bargeIn: true, bargeInMinMs: 600 },
   brain: DEFAULT_BRAIN_CONFIG,

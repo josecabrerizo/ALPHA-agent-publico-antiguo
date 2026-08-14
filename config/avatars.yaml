@@ -45,7 +45,7 @@ avatars:
       solo si hace falta.
     local: true
     model: ollama/gemma4:12b
-    image: assets/avatars/unit-a.svg
+    image: assets/avatars/unit-a.png
     voice:
       engine: sapi
       name: Microsoft Zira Desktop

@@ -12,9 +12,17 @@ import path from 'node:path';
  */
 
 // Debe coincidir con AVATAR_BRIDGE_PORT del motor.
-const PORT = 43117;
-// dist/bridge-client.js -> repoRoot: tres niveles arriba.
-const tokenPath = path.resolve(__dirname, '..', '..', '..', 'config', 'alpha.bridge-token');
+const DEFAULT_PORT = 43117;
+/**
+ * Puerto del motor. Se puede cambiar con ALPHA_BRIDGE_PORT, la MISMA variable
+ * que usa el motor: sin esto, levantar una segunda instancia con otro puerto
+ * dejaba su avatar sin forma de conectarse.
+ */
+const PORT = Number(process.env['ALPHA_BRIDGE_PORT']) || DEFAULT_PORT;
+// dist/bridge-client.js -> repoRoot: tres niveles arriba. El fichero de token va
+// atado al puerto (ver bridgeTokenPathFor en el motor): una instancia, un token.
+const tokenFile = PORT === DEFAULT_PORT ? 'alpha.bridge-token' : `alpha.bridge-token.${PORT}`;
+const tokenPath = path.resolve(__dirname, '..', '..', '..', 'config', tokenFile);
 
 function readToken(): string {
   try {
@@ -48,6 +56,8 @@ export interface VoiceOption {
 }
 
 export type BridgeMessage =
+  /** Acuse del handshake: a partir de aqui el motor nos escucha de verdad. */
+  | { type: 'ready' }
   | { type: 'state'; state: 'reposo' | 'escuchando' | 'pensando' | 'hablando' }
   | { type: 'user'; text: string }
   | { type: 'assistant'; text: string }
@@ -76,11 +86,13 @@ export interface TextInputMessage {
 }
 
 export interface BridgeHandle {
-  /** Envia la config al motor. Si no hay conexion, se ignora (el motor la leera
-   *  del fichero al arrancar). */
+  /** Envia la config al motor. Si no esta autenticado, se ignora (el motor la
+   *  leera del fichero al arrancar). */
   send(msg: ConfigMessage): void;
-  /** Envia un mensaje escrito. Devuelve false si no hay motor conectado. */
+  /** Envia un mensaje escrito. Devuelve false si el motor no lo va a recibir. */
   sendText(text: string): boolean;
+  /** true si el motor ya acuso el handshake. */
+  isReady(): boolean;
   close(): void;
 }
 
@@ -88,11 +100,18 @@ export function connectBridge(onMessage: (msg: BridgeMessage) => void): BridgeHa
   let socket: net.Socket | undefined;
   let buffer = '';
   let closed = false;
+  /**
+   * El motor nos ha acusado el handshake. Un socket escribible NO basta: entre
+   * conectar y autenticarse el motor tira todo lo que llega, y sin este acuse
+   * sendText decia "enviado" sobre mensajes que se perdian.
+   */
+  let ready = false;
 
   const connect = () => {
     if (closed) return;
     const s = net.connect(PORT, '127.0.0.1');
     socket = s;
+    ready = false;
 
     // Handshake: el token se relee en cada conexion porque el motor genera uno
     // nuevo en cada arranque.
@@ -109,7 +128,9 @@ export function connectBridge(onMessage: (msg: BridgeMessage) => void): BridgeHa
         buffer = buffer.slice(nl + 1);
         if (!line) continue;
         try {
-          onMessage(JSON.parse(line) as BridgeMessage);
+          const msg = JSON.parse(line) as BridgeMessage;
+          if (msg.type === 'ready') ready = true;
+          onMessage(msg);
         } catch {
           // linea corrupta: ignorar, no tumbar el avatar
         }
@@ -120,21 +141,25 @@ export function connectBridge(onMessage: (msg: BridgeMessage) => void): BridgeHa
     s.on('error', () => {});
     s.on('close', () => {
       buffer = '';
+      ready = false;
       if (!closed) setTimeout(connect, 1000);
     });
   };
 
+  const usable = () => ready && socket?.writable === true;
+
   connect();
   return {
     send(msg: ConfigMessage) {
-      if (socket?.writable) socket.write(JSON.stringify(msg) + '\n');
+      if (usable()) socket?.write(JSON.stringify(msg) + '\n');
     },
     sendText(text: string): boolean {
-      if (!socket?.writable) return false;
+      if (!usable()) return false;
       const msg: TextInputMessage = { type: 'text-input', text };
-      socket.write(JSON.stringify(msg) + '\n');
+      socket?.write(JSON.stringify(msg) + '\n');
       return true;
     },
+    isReady: usable,
     close() {
       closed = true;
       socket?.destroy();

@@ -13,7 +13,7 @@ import { Brain } from '../brain/client.js';
 import { ToolRegistry } from '../brain/tools/registry.js';
 import { BUILTIN_TOOLS } from '../brain/tools/builtin.js';
 import { SkillLibrary } from '../brain/skills/library.js';
-import { skillsDir } from '../paths.js';
+import { skillsDir, whisperModel } from '../paths.js';
 import { createSpeaker } from '../tts/speaker.js';
 import { getAvailableVoices, resolveVoiceId } from '../tts/voices.js';
 import { listInputDevices, defaultInputDevice } from '../audio/devices.js';
@@ -58,7 +58,13 @@ const captureOptions = {
 // device vacio = el predeterminado del sistema; ffmpeg necesita el nombre real.
 if (!captureOptions.device) captureOptions.device = (await defaultInputDevice()).name;
 
-const whisper = new WhisperTranscriber({ language: config.stt.language });
+// El tamano del modelo sale de la config (stt.model). Antes solo se pasaba el
+// idioma, asi que la opcion existia, se validaba y no la usaba nadie: siempre
+// se transcribia con "small".
+const whisper = new WhisperTranscriber({
+  language: config.stt.language,
+  modelPath: whisperModel(config.stt.model),
+});
 const skills = new SkillLibrary(skillsDir);
 await skills.load();
 const tools = new ToolRegistry().registerAll(BUILTIN_TOOLS).registerAll(skills.tools());
@@ -113,7 +119,10 @@ console.log(`\n  A.L.P.H.A. — conversacion completa`);
 console.log(
   `  Avatar:    ${avatar ? `${avatar.name} — ${avatar.role} ${avatar.local ? '(solo local)' : '(usa nube)'}` : '(ninguno)'}`,
 );
-console.log(`  Microfono: ${captureOptions.device}${captureOptions.gainDb ? ` (+${captureOptions.gainDb} dB)` : ''}`);
+console.log(
+  `  Microfono: ${captureOptions.device}${captureOptions.gainDb ? ` (+${captureOptions.gainDb} dB)` : ''}${config.audio.micEnabled ? '' : '  — SILENCIADO (guardado)'}`,
+);
+console.log(`  Whisper:   modelo ${config.stt.model}, idioma ${config.stt.language}`);
 console.log(`  Cerebro:   ${brainInfo.provider}/${brainInfo.model} ${brainInfo.local ? '(local)' : '(nube)'}`);
 console.log(`  Voz:       ${voiceInfo.engine}/${voiceInfo.voice} ${voiceInfo.local ? '(local)' : '(nube)'}`);
 console.log(`  Herramientas: ${tools.list().map((t) => t.name).join(', ')}`);
@@ -196,6 +205,10 @@ const session = new ConversationSession({
   },
 });
 
+// El mute es un ajuste persistido, no un estado de la sesion: si se dejo el
+// microfono cerrado, se arranca cerrado (y el indicador del sistema, apagado).
+if (!config.audio.micEnabled) session.setMicEnabled(false);
+
 // Manda al avatar la lista de microfonos disponibles (al arrancar y cada vez
 // que un avatar se conecta), marcando el activo.
 async function sendDevices(): Promise<void> {
@@ -226,9 +239,27 @@ function sendAvatars(): void {
 // Se calcula una sola vez al arrancar.
 let availableVoices: Awaited<ReturnType<typeof getAvailableVoices>> = [];
 const voicesReady = getAvailableVoices()
-  .then((v) => {
+  .then(async (v) => {
     availableVoices = v;
     log(`voces disponibles: ${v.length} (${v.filter((vo) => vo.local).length} locales)`);
+    // La voz elegida a mano en el menu tambien se persiste; se aplica en cuanto
+    // hay lista con la que resolverla. Sin esto se guardaba y no se leia nunca:
+    // al reiniciar volvia la voz del perfil del avatar.
+    if (!config.tts.voiceId) return;
+    const saved = availableVoices.find((vo) => vo.id === config.tts.voiceId);
+    if (confidential && saved && !saved.local) {
+      log(`⚙️  la voz guardada "${saved.name}" usa la nube y el modo confidencial esta activo — se mantiene la del avatar`);
+      return;
+    }
+    try {
+      const next = await makeSpeakerForVoice(config.tts.voiceId, confidential);
+      speaker.stop();
+      speaker = next;
+      session.reconfigure({ speaker });
+      log(`⚙️  voz guardada: ${speaker.describe().voice}`);
+    } catch (err) {
+      log(`✗ [voz] ${(err as Error).message} — se mantiene la del avatar`);
+    }
   })
   .catch(() => {
     log(`no se pudieron enumerar las voces disponibles`);

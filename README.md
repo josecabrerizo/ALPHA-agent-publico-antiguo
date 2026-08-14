@@ -7,29 +7,34 @@ En el espíritu del viejo Clippy, pero con un cerebro de verdad y sin ceder la
 privacidad: la captura, el VAD y la transcripción corren en la máquina; la nube
 es un acelerador opcional que el **modo confidencial** apaga por completo.
 
-Windows y Linux. Todo Node/TypeScript, sin Python.
+Todo Node/TypeScript, sin Python. Se desarrolla en **Windows**; en **Linux**
+funciona la conversación, pero no todo (ver la tabla).
 
 ## Estado
 
 MVP conversacional **funcionando de punta a punta**: hablas o escribes al avatar,
 A.L.P.H.A. piensa (con herramientas y skills) y responde con voz. Falta la visión.
 
-| Capa | Estado |
-|---|---|
-| Captura de micrófono (ffmpeg) | ✅ |
-| Captura del audio del sistema (WASAPI loopback) | ✅ |
-| VAD por energía | ✅ |
-| STT (whisper.cpp) | ✅ |
-| Cerebro LLM (compatible-OpenAI: Ollama + nube) | ✅ |
-| Voz (msedge-tts online / SAPI local) | ✅ |
-| Avatar flotante (NodeGui) + menú de configuración | ✅ |
-| Interruptor de micrófono (suelta el dispositivo) | ✅ |
-| Puente motor↔avatar (TCP local con token) | ✅ |
-| Bucle completo escuchar→pensar→hablar | ✅ |
-| Chat escrito | ✅ |
-| Herramientas (tool-calling) | ✅ |
-| Skills (estándar SKILL.md, el agente las crea) | ✅ |
-| Visión de pantalla | ⬜ |
+| Capa | Windows | Linux |
+|---|---|---|
+| Captura de micrófono (ffmpeg) | ✅ dshow | ✅ pulse |
+| Captura del audio del sistema | ✅ WASAPI loopback | ⬜ falta PipeWire/PulseAudio |
+| VAD por energía | ✅ | ✅ |
+| STT (whisper.cpp) | ✅ | ✅ |
+| Cerebro LLM (compatible-OpenAI: Ollama + nube) | ✅ | ✅ |
+| Voz de nube (msedge-tts) | ✅ | ✅ |
+| Voz local / modo confidencial | ✅ SAPI | ✅ espeak-ng (hay que instalarlo) |
+| Avatar flotante (NodeGui) + menú de configuración | ✅ | ✅ |
+| Interruptor de micrófono (suelta el dispositivo) | ✅ | ✅ |
+| Puente motor↔avatar (TCP local con token) | ✅ | ✅ |
+| Bucle completo escuchar→pensar→hablar | ✅ | ✅ |
+| Chat escrito | ✅ | ✅ |
+| Herramientas (tool-calling) | ✅ | ✅ |
+| Skills (estándar SKILL.md, el agente las crea) | ✅ | ✅ |
+| Visión de pantalla | ⬜ | ⬜ |
+
+El menú de voces del avatar solo enumera voces locales en Windows (SAPI). En
+Linux la voz local es la de espeak-ng y no aparece en esa lista todavía.
 
 Ejecuta todo con `npm run spike:conversar` (motor) y `npm run avatar` (cara).
 
@@ -38,6 +43,9 @@ Ejecuta todo con `npm run spike:conversar` (motor) y `npm run avatar` (cara).
 - **Node ≥ 22**
 - **ffmpeg** en el `PATH` — captura el audio y, más adelante, la pantalla
 - **Ollama** (opcional hasta que exista el cerebro)
+- En **Linux**, `espeak-ng` si quieres voz sin nube (`apt install espeak-ng`).
+  Sin él el modo confidencial se queda sin voz y lo dice al arrancar, en vez de
+  fallar en cada frase.
 
 ## Puesta en marcha
 
@@ -57,7 +65,7 @@ de adivinar:
 npm run mic-check              # ¿capta el micro? Ritmo y nivel en dBFS
 npm run mic-check -- 10        # ...durante 10s
 npm run spike:stt-file -- x.wav  # ¿transcribe? Sin micro de por medio
-npm run spike:system           # transcribe lo que SUENA en el PC (loopback)
+npm run spike:system           # transcribe lo que SUENA en el PC (loopback, solo Windows)
 npm test                       # ¿segmenta el VAD? Con audio sintético
 ```
 
@@ -263,12 +271,39 @@ sigue funcionando con el micrófono cerrado.
 ### Dos motores a la vez
 
 El puente usa un puerto fijo, así que un segundo motor lo encuentra ocupado y se
-queda sin avatar. Ahora lo dice al arrancar en vez de anunciar que escucha, y se
-puede levantar otra instancia para probar sin matar la que esté en uso:
+queda sin avatar. Lo dice al arrancar en vez de anunciar que escucha, y se puede
+levantar otra instancia completa para probar sin matar la que esté en uso: la
+**misma** variable la entienden motor y avatar, y cada puerto tiene su propio
+fichero de token, así que las dos instancias no se pisan la autenticación.
 
 ```bash
-ALPHA_BRIDGE_PORT=43118 npm run spike:conversar
+ALPHA_BRIDGE_PORT=43118 npm run spike:conversar   # motor de pruebas
+ALPHA_BRIDGE_PORT=43118 npm run avatar            # su avatar
 ```
+
+### Vulnerabilidades de dependencias
+
+`npm audit --omit=dev` reporta 7 avisos (1 crítico, 5 altos, 1 moderado). **No
+ejecutes `npm audit fix --force`**: su "arreglo" es bajar `@nodegui/nodegui` de
+0.74 a 0.37, es decir, retroceder años en la UI.
+
+De dónde salen y qué exponen de verdad:
+
+- **`tar` 6.2.1** (crítico/alto) — entra por `@nodegui/qode` y por `cmake-js`
+  (dependencia de `audify`). Solo se usa **al instalar**, para descargar y
+  descomprimir Qt y los prebuilds nativos; no toca archivos del usuario en
+  tiempo de ejecución. Aun así es superficie de cadena de suministro real. Las
+  correcciones están en `tar` 7.x, y ni `cmake-js` 7.4 ni `qode` lo soportan: no
+  se puede forzar con `overrides` sin romper la instalación.
+- **`postcss` 7.0.39** (alto) — lo usa NodeGui **en ejecución** para procesar los
+  estilos (`setInlineStyle`). Los avisos son de lectura de ficheros `.map` por
+  `sourceMappingURL` y de escapado al serializar; aquí el CSS lo escribimos
+  nosotros en el código, no viene de fuera. Subir a postcss 8 rompería
+  `postcss-nodegui-autoprefixer`, que usa la API de plugins de la 7.
+
+Es decir: nada accionable sin que actualicen NodeGui y `audify`/`cmake-js`. La
+salida de fondo, si esto pesa, es sustituir la capa de UI o el módulo nativo de
+audio; no un `fix --force`.
 
 ## Licencia
 

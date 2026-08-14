@@ -50,6 +50,12 @@ export interface ConversationDeps {
   bargeIn?: boolean;
   /** Habla minima (ms) para considerar una interrupcion. */
   bargeInMinMs?: number;
+  /**
+   * De donde sale el audio. En produccion siempre es captureMicrophone; se
+   * inyecta para poder probar el ciclo escuchar → pensar → hablar entero sin
+   * microfono ni ffmpeg, que es donde viven las carreras dificiles.
+   */
+  openCapture?: (options: CaptureOptions) => CaptureHandle;
 }
 
 /**
@@ -69,12 +75,19 @@ export class ConversationSession {
   private speaker: Speaker;
   private readonly cb: ConversationCallbacks;
   private captureOptions: CaptureOptions;
+  private readonly openCapture: (options: CaptureOptions) => CaptureHandle;
   private readonly history: ChatMessage[] = [];
 
   private handle: CaptureHandle | undefined;
   private running = false;
   private restartRequested = false;
-  private busy = false; // hay un turno (voz o texto) en curso
+  /**
+   * Hay un turno (voz o texto) en vuelo. Se reclama en claimTurn ANTES de
+   * transcribir, no al empezar a pensar: mientras whisper trabaja la sesion ya
+   * esta ocupada, y sin eso el bucle de audio (o un mensaje escrito) podia
+   * arrancar un segundo turno que pisaba turnController y currentTurn.
+   */
+  private busy = false;
   private turnController: AbortController | undefined; // cancela el turno actual
 
   private readonly bargeIn: boolean;
@@ -101,6 +114,7 @@ export class ConversationSession {
     this.speaker = deps.speaker;
     this.cb = deps.callbacks ?? {};
     this.captureOptions = deps.capture ?? {};
+    this.openCapture = deps.openCapture ?? captureMicrophone;
     this.bargeIn = deps.bargeIn ?? true;
     this.bargeInMinMs = deps.bargeInMinMs ?? DEFAULT_BARGE_IN_MIN_MS;
   }
@@ -188,7 +202,7 @@ export class ConversationSession {
       }
       this.restartRequested = false;
       const openedAt = performance.now();
-      const capture = captureMicrophone(this.captureOptions);
+      const capture = this.openCapture(this.captureOptions);
       this.handle = capture;
       // La compuerta drena ffmpeg siempre (sin backpressure) y solo pasa audio
       // al VAD cuando esta abierta. Se cierra mientras se piensa/habla, para no
@@ -249,21 +263,48 @@ export class ConversationSession {
   }
 
   /**
-   * Turno de voz: transcribe el audio y responde. La transcripcion es lo unico
-   * propio del canal de voz; el resto (pensar y hablar) lo comparte con el
-   * texto via respondTo.
+   * Reclama la sesion para un turno nuevo. Devuelve su controlador, o undefined
+   * si ya hay uno en vuelo.
+   *
+   * Es SINCRONO a proposito: pone el flag antes del primer await (la
+   * transcripcion). Ese hueco —de runTurn hasta respondTo— era por donde se
+   * colaba un segundo turno: dos whisper a la vez, el controlador del turno
+   * bueno sobrescrito por el del intruso y un historial descuadrado.
    */
+  private claimTurn(): AbortController | undefined {
+    if (this.busy) return undefined;
+    this.busy = true;
+    const controller = new AbortController();
+    this.turnController = controller;
+    return controller;
+  }
+
+  /**
+   * Suelta la sesion, pero SOLO si sigue siendo la del turno que la reclamo: si
+   * una interrupcion ya arranco otro turno, el viejo al terminar no debe
+   * liberar (ni cancelar la cola de voz de) el nuevo.
+   */
+  private releaseTurn(controller: AbortController): void {
+    if (this.turnController !== controller) return;
+    this.busy = false;
+    this.turnController = undefined;
+    this.activeQueue = undefined;
+  }
+
   /**
    * Envuelve un turno de voz: se lanza sin bloquear el consumo de audio, y al
    * acabar devuelve el estado a "escuchando" (salvo que una interrupcion ya
    * haya arrancado otro turno).
    */
   private async runTurn(pcm: Buffer, gate: AudioGate): Promise<void> {
+    const controller = this.claimTurn();
+    if (!controller) return; // ya hay turno en vuelo: este audio se descarta
     try {
-      await this.handleTurn(pcm);
+      await this.handleTurn(pcm, controller);
     } catch (error) {
       this.cb.onError?.('turno', error as Error);
     } finally {
+      this.releaseTurn(controller);
       if (this.running && !this.restartRequested && !this.busy) {
         this.cb.onState?.('escuchando');
         if (!this.bargeIn) gate.setOpen(true);
@@ -303,13 +344,23 @@ export class ConversationSession {
       this.activeQueue?.stop();
       await this.currentTurn?.catch(() => {});
 
+      // Reclamar antes de nada: el turno viejo ya solto la sesion al terminar,
+      // asi que hay que volver a cogerla para que el bucle de audio no meta
+      // otro turno por delante de la interrupcion.
+      const controller = this.claimTurn();
+      if (!controller) {
+        this.cb.onLog?.('interrupcion descartada: ya hay otro turno en marcha');
+        return;
+      }
+
       // Se fusiona con lo anterior para que responda a todo junto: el caso real
       // es que sigues completando tu idea mientras ya te contesta. La respuesta
       // a medias no llega a guardarse (solo se apila al completarse).
       if (this.history.at(-1)?.role === 'user') this.history.pop();
       const combined = mergeUserTurns(this.lastUserText, heard);
       this.cb.onUserText?.(combined);
-      this.currentTurn = this.respondTo(combined).finally(() => {
+      this.currentTurn = this.respondTo(combined, controller.signal).finally(() => {
+        this.releaseTurn(controller);
         if (this.running && !this.busy) this.cb.onState?.('escuchando');
       });
     } catch (error) {
@@ -319,10 +370,13 @@ export class ConversationSession {
     }
   }
 
-  private async handleTurn(pcm: Buffer): Promise<void> {
+  /**
+   * Turno de voz: transcribe el audio y responde. La transcripcion es lo unico
+   * propio del canal de voz; el resto (pensar y hablar) lo comparte con el
+   * texto via respondTo. El controlador lo pone quien reclamo el turno.
+   */
+  private async handleTurn(pcm: Buffer, controller: AbortController): Promise<void> {
     const t0 = performance.now();
-    const controller = new AbortController();
-    this.turnController = controller;
     this.cb.onState?.('pensando');
     this.cb.onLog?.('transcribiendo…');
     let text: string;
@@ -333,12 +387,10 @@ export class ConversationSession {
       });
     } catch (error) {
       if (!controller.signal.aborted) this.cb.onError?.('stt', error as Error);
-      this.turnController = undefined;
       return;
     }
     if (!text) {
       this.cb.onLog?.(`transcrito en ${Math.round(performance.now() - t0)}ms: sin habla (ruido)`);
-      this.turnController = undefined;
       return;
     }
     this.cb.onLog?.(`transcrito en ${Math.round(performance.now() - t0)}ms`);
@@ -353,91 +405,93 @@ export class ConversationSession {
   async sendText(text: string): Promise<void> {
     const clean = text.trim();
     if (!clean) return;
-    if (this.busy) {
+    const controller = this.claimTurn();
+    if (!controller) {
       this.cb.onLog?.('ocupado; espera a que termine el turno actual');
       return;
     }
-    const controller = new AbortController();
-    this.turnController = controller;
     this.cb.onLog?.(`texto › ${clean}`);
     this.cb.onUserText?.(clean);
-    await this.respondTo(clean, controller.signal);
-    this.cb.onState?.('escuchando');
+    // Se publica como turno en vuelo para que una interrupcion sepa a que
+    // esperar antes de relanzar (antes solo lo hacia el canal de voz).
+    this.currentTurn = this.respondTo(clean, controller.signal);
+    try {
+      await this.currentTurn;
+    } finally {
+      this.releaseTurn(controller);
+      if (this.running && !this.busy) this.cb.onState?.('escuchando');
+    }
   }
 
   /**
    * Pensar (LLM con herramientas) + hablar, en tuberia: las frases se dicen
    * conforme el cerebro las termina; si pide herramientas, se ejecutan y sigue.
-   * Comun a la voz y al texto. El flag busy evita que un turno pise a otro.
+   * Comun a la voz y al texto.
+   *
+   * NO gestiona la exclusion: quien llama ya reclamo el turno con claimTurn y
+   * lo suelta con releaseTurn. Tener el flag aqui dejaba fuera la fase de
+   * transcripcion, que es justo donde estaba el hueco.
    */
   private async respondTo(text: string, signal?: AbortSignal): Promise<void> {
-    if (this.busy) return;
-    this.busy = true;
     const ms = (from: number) => Math.round(performance.now() - from);
+    this.history.push({ role: 'user', content: text });
+    this.lastUserText = text; // por si hay que fusionar una interrupcion
+    this.spokenSoFar = ''; // el eco se compara contra ESTE turno
+    this.cb.onState?.('pensando');
+    this.cb.onLog?.('consultando al cerebro…');
+    const tBrain = performance.now();
+    const queue = new SpeechQueue(
+      this.speaker,
+      () => this.cb.onState?.('hablando'),
+      (error) => this.cb.onError?.('tts', error),
+    );
+    this.activeQueue = queue; // para poder cortar la voz al interrumpir
+    let full = '';
+    let buffer = '';
+    let firstToken = false;
     try {
-      this.history.push({ role: 'user', content: text });
-      this.lastUserText = text; // por si hay que fusionar una interrupcion
-      this.spokenSoFar = ''; // el eco se compara contra ESTE turno
-      this.cb.onState?.('pensando');
-      this.cb.onLog?.('consultando al cerebro…');
-      const tBrain = performance.now();
-      const queue = new SpeechQueue(
-        this.speaker,
-        () => this.cb.onState?.('hablando'),
-        (error) => this.cb.onError?.('tts', error),
-      );
-      this.activeQueue = queue; // para poder cortar la voz al interrumpir
-      let full = '';
-      let buffer = '';
-      let firstToken = false;
-      try {
-        for await (const ev of this.brain.runAgentic(this.history, {
-          ...(signal ? { signal } : {}),
-          timeoutMs: LLM_TIMEOUT_MS,
-        })) {
-          if (ev.type === 'tool-start') {
-            this.cb.onState?.('pensando');
-            this.cb.onLog?.(`herramienta: ${ev.name}(${ev.args || ''})`);
-            continue;
-          }
-          if (ev.type === 'tool-end') {
-            this.cb.onLog?.(`  → ${ev.result}`);
-            continue;
-          }
-          // ev.type === 'text'
-          if (!firstToken) {
-            firstToken = true;
-            this.cb.onLog?.(`primer token del cerebro en ${ms(tBrain)}ms`);
-          }
-          full += ev.delta;
-          this.spokenSoFar = full; // referencia viva para rechazar su propio eco
-          buffer += ev.delta;
-          const { sentences, rest } = splitSentences(buffer);
-          for (const sentence of sentences) queue.enqueue(sentence);
-          buffer = rest;
+      for await (const ev of this.brain.runAgentic(this.history, {
+        ...(signal ? { signal } : {}),
+        timeoutMs: LLM_TIMEOUT_MS,
+      })) {
+        if (ev.type === 'tool-start') {
+          this.cb.onState?.('pensando');
+          this.cb.onLog?.(`herramienta: ${ev.name}(${ev.args || ''})`);
+          continue;
         }
-        if (buffer.trim()) queue.enqueue(buffer);
-        this.cb.onLog?.(`respuesta generada en ${ms(tBrain)}ms; terminando de hablar…`);
-        await queue.drain();
-      } catch (error) {
-        queue.stop();
-        // Si el turno se cancelo (stop, timeout), no es un error que reportar.
-        if (!signal?.aborted) this.cb.onError?.('brain', error as Error);
-        return;
+        if (ev.type === 'tool-end') {
+          this.cb.onLog?.(`  → ${ev.result}`);
+          continue;
+        }
+        // ev.type === 'text'
+        if (!firstToken) {
+          firstToken = true;
+          this.cb.onLog?.(`primer token del cerebro en ${ms(tBrain)}ms`);
+        }
+        full += ev.delta;
+        this.spokenSoFar = full; // referencia viva para rechazar su propio eco
+        buffer += ev.delta;
+        const { sentences, rest } = splitSentences(buffer);
+        for (const sentence of sentences) queue.enqueue(sentence);
+        buffer = rest;
       }
+      if (buffer.trim()) queue.enqueue(buffer);
+      this.cb.onLog?.(`respuesta generada en ${ms(tBrain)}ms; terminando de hablar…`);
+      await queue.drain();
+    } catch (error) {
+      queue.stop();
+      // Si el turno se cancelo (stop, timeout), no es un error que reportar.
+      if (!signal?.aborted) this.cb.onError?.('brain', error as Error);
+      return;
+    }
 
-      if (full.trim()) {
-        this.cb.onAssistantText?.(full);
-        this.history.push({ role: 'assistant', content: full });
-      }
-      // Ventana deslizante: se descartan los turnos mas viejos por el frente.
-      if (this.history.length > MAX_HISTORY_MESSAGES) {
-        this.history.splice(0, this.history.length - MAX_HISTORY_MESSAGES);
-      }
-    } finally {
-      this.busy = false;
-      this.turnController = undefined;
-      this.activeQueue = undefined;
+    if (full.trim()) {
+      this.cb.onAssistantText?.(full);
+      this.history.push({ role: 'assistant', content: full });
+    }
+    // Ventana deslizante: se descartan los turnos mas viejos por el frente.
+    if (this.history.length > MAX_HISTORY_MESSAGES) {
+      this.history.splice(0, this.history.length - MAX_HISTORY_MESSAGES);
     }
   }
 

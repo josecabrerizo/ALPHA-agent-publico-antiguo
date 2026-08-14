@@ -20,6 +20,9 @@ audio:
   device: ''        # nombre exacto del microfono; vacio = el del sistema
   gainDb: 0         # ganancia fija en dB (micros lejanos flojos)
   normalize: false  # normalizacion dinamica (dynaudnorm)
+  # false = ni se abre la captura (el indicador de micro del sistema, apagado).
+  # Lo escribe el interruptor del avatar y se conserva entre arranques.
+  micEnabled: true
 
 stt:
   model: small      # base | small | medium (small es el minimo decente en espanol)
@@ -66,3 +69,6 @@ tts:
   # Local es SAPI (voces de Windows), no Piper: Piper saca sus voces de
   # HuggingFace, bloqueado en esta red. En modo confidencial se usa este.
   sapiVoice: Microsoft Helena Desktop
+  # Voz elegida a mano en el menu del avatar ("sapi:Nombre" | "edge:es-ES-...").
+  # Manda sobre la del perfil del avatar. Vacio = la que traiga el perfil.
+  voiceId: ''

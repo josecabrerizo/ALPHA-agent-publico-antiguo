@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { parseAvatars, loadAvatars } from './avatars.js';
 import { repoRoot } from '../paths.js';
@@ -93,4 +94,16 @@ test('el avatars.yaml del repo trae los cuatro perfiles y respeta el contrato', 
     avatars.some((a) => a.local),
     'debe haber al menos un avatar local, o el modo confidencial se queda sin opciones',
   );
+});
+
+/**
+ * El contrato solo exigia que hubiera una RUTA de imagen, no que apuntase a
+ * algo. Por eso paso desapercibido que el avatar por defecto (unit-a) apuntara
+ * a un .svg que no existe: la UI no encontraba el fichero y caia al orbe, con
+ * el personaje desaparecido y sin mas rastro que una linea de log.
+ */
+test('las imagenes de los avatares existen de verdad', () => {
+  for (const a of loadAvatars()) {
+    assert.ok(existsSync(a.image), `${a.id}: no existe la imagen ${a.image}`);
+  }
 });

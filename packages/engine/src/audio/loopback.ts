@@ -19,6 +19,22 @@ const rtEnums = audify as unknown as {
 const WASAPI = rtEnums.RtAudioApi.WINDOWS_WASAPI as ApiArg;
 const SINT16 = rtEnums.RtAudioFormat.RTAUDIO_SINT16 as FormatArg;
 
+/**
+ * SOLO WINDOWS. Todo este modulo abre el mezclador por WASAPI loopback, que es
+ * una API de Windows: en Linux el equivalente es monitorizar el sink de
+ * PipeWire/PulseAudio, y eso no esta implementado todavia. Se comprueba y se
+ * dice; antes se construia RtAudio(WINDOWS_WASAPI) igualmente y el fallo salia
+ * como un error opaco del modulo nativo.
+ */
+function requireWindows(): void {
+  if (process.platform === 'win32') return;
+  throw new Error(
+    `La captura del audio del sistema es solo para Windows (WASAPI loopback); ` +
+      `este equipo es ${process.platform}. En Linux hara falta leer el monitor ` +
+      `de PipeWire/PulseAudio, que aun no esta implementado.`,
+  );
+}
+
 export interface LoopbackOptions {
   /**
    * Nombre del dispositivo de SALIDA cuyo audio capturar. Por defecto, la
@@ -31,6 +47,7 @@ export interface LoopbackOptions {
 
 /**
  * Captura lo que suena en el PC (audio del sistema) por WASAPI loopback.
+ * SOLO WINDOWS: ver requireWindows.
  *
  * Es la unica via automatica en Windows: no necesita Mezcla estereo, ni cable
  * virtual, ni que el usuario habilite nada. Se abre el dispositivo de SALIDA
@@ -46,6 +63,7 @@ export interface LoopbackOptions {
  * y whisper no distinguen el origen.
  */
 export function captureSystemAudio(options: LoopbackOptions = {}): CaptureHandle {
+  requireWindows();
   const rtaudio = new RtAudio(WASAPI);
   const device = pickOutputDevice(rtaudio, options.outputDeviceName);
 
@@ -149,8 +167,9 @@ function buildFilterArgs(options: LoopbackOptions): string[] {
   return filters.length > 0 ? ['-af', filters.join(',')] : [];
 }
 
-/** Nombres de las salidas disponibles, para elegir cual capturar. */
+/** Nombres de las salidas disponibles, para elegir cual capturar. SOLO WINDOWS. */
 export function listOutputDevices(): string[] {
+  requireWindows();
   const rtaudio = new RtAudio(WASAPI);
   return rtaudio
     .getDevices()

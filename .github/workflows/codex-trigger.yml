@@ -23,7 +23,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Comentar "@codex review" (identidad de usuario vía PAT)
-        uses: actions/github-script@v7
+        # Fijada por SHA: un tag movil podria reapuntarse a otro commit, y aqui
+        # se ejecuta con un PAT de usuario.
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           # PAT de usuario → el comentario lo firma esa cuenta (no el bot).
           github-token: ${{ secrets.CODEX_TRIGGER_TOKEN }}
