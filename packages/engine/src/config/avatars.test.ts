@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { parseAvatars, loadAvatars, patchAvatarsYaml } from './avatars.js';
 import { repoRoot } from '../paths.js';
@@ -132,5 +132,46 @@ test('rechaza modificar un avatar que no existe', () => {
 test('las imagenes de los avatares existen de verdad', () => {
   for (const a of loadAvatars()) {
     assert.ok(existsSync(a.image), `${a.id}: no existe la imagen ${a.image}`);
+  }
+});
+
+/**
+ * La carpeta de poses de un avatar se deduce de la ruta de su retrato
+ * (`synapse.png` -> `synapse/`), asi que su nombre tiene que coincidir EXACTO.
+ *
+ * En Windows da igual la caja y esto no se nota; en Linux, una carpeta
+ * "Synapse/" no la encuentra nadie y el personaje se queda quieto sin que nada
+ * lo delate. Se compara contra lo que devuelve readdir, que da el nombre real
+ * del disco, en vez de contra existsSync, que aqui mentiria.
+ */
+test('las carpetas de poses se llaman igual que su avatar, con la misma caja', () => {
+  const dir = path.join(repoRoot, 'assets', 'avatars');
+  const enDisco = readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name);
+
+  for (const carpeta of enDisco) {
+    const ids = loadAvatars().map((a) => a.id);
+    assert.ok(
+      ids.includes(carpeta),
+      `la carpeta "${carpeta}" no corresponde a ningun avatar (¿caja distinta?); ids: ${ids.join(', ')}`,
+    );
+  }
+});
+
+/** Un juego de poses a medias deja una transicion sin uno de sus extremos. */
+test('un avatar con poses las tiene TODAS', () => {
+  const dir = path.join(repoRoot, 'assets', 'avatars');
+  const poses = ['reposo', 'saludo', 'hablando', 'pensando'];
+  for (const a of loadAvatars()) {
+    const suyo = path.join(dir, a.id);
+    if (!existsSync(suyo)) continue; // sin poses: retrato fijo, es valido
+    const hay = readdirSync(suyo);
+    for (const p of poses) {
+      assert.ok(
+        hay.includes(`${p}.png`),
+        `${a.id}: falta la pose ${p}.png (hay: ${hay.join(', ')})`,
+      );
+    }
   }
 });
