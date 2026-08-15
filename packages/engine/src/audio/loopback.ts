@@ -7,17 +7,32 @@ const { RtAudio } = audify;
 
 // audify declara RtAudioApi/RtAudioFormat como `const enum` NO exportados:
 // invisibles para TS (y ademas chocan con verbatimModuleSyntax). Pero en
-// runtime son objetos reales. Se leen de ahi y se castean al tipo exacto que
-// espera cada parametro de RtAudio, que si es publico, en vez de fijar numeros
-// magicos que se romperian si audify los renumera.
+// runtime son objetos reales. Se leen de ahi, en vez de fijar numeros magicos
+// que se romperian si audify los renumera. El de la API necesita ademas el tipo
+// exacto que espera el constructor, que si es publico.
 type ApiArg = ConstructorParameters<typeof RtAudio>[0];
-type FormatArg = Parameters<InstanceType<typeof RtAudio>['openStream']>[2];
 const rtEnums = audify as unknown as {
   RtAudioApi: { WINDOWS_WASAPI: number };
   RtAudioFormat: { RTAUDIO_SINT16: number };
 };
 const WASAPI = rtEnums.RtAudioApi.WINDOWS_WASAPI as ApiArg;
-const SINT16 = rtEnums.RtAudioFormat.RTAUDIO_SINT16 as FormatArg;
+const SINT16 = rtEnums.RtAudioFormat.RTAUDIO_SINT16;
+
+/**
+ * SOLO WINDOWS. Todo este modulo abre el mezclador por WASAPI loopback, que es
+ * una API de Windows: en Linux el equivalente es monitorizar el sink de
+ * PipeWire/PulseAudio, y eso no esta implementado todavia. Se comprueba y se
+ * dice; antes se construia RtAudio(WINDOWS_WASAPI) igualmente y el fallo salia
+ * como un error opaco del modulo nativo.
+ */
+function requireWindows(): void {
+  if (process.platform === 'win32') return;
+  throw new Error(
+    `La captura del audio del sistema es solo para Windows (WASAPI loopback); ` +
+      `este equipo es ${process.platform}. En Linux hara falta leer el monitor ` +
+      `de PipeWire/PulseAudio, que aun no esta implementado.`,
+  );
+}
 
 export interface LoopbackOptions {
   /**
@@ -31,6 +46,7 @@ export interface LoopbackOptions {
 
 /**
  * Captura lo que suena en el PC (audio del sistema) por WASAPI loopback.
+ * SOLO WINDOWS: ver requireWindows.
  *
  * Es la unica via automatica en Windows: no necesita Mezcla estereo, ni cable
  * virtual, ni que el usuario habilite nada. Se abre el dispositivo de SALIDA
@@ -46,6 +62,7 @@ export interface LoopbackOptions {
  * y whisper no distinguen el origen.
  */
 export function captureSystemAudio(options: LoopbackOptions = {}): CaptureHandle {
+  requireWindows();
   const rtaudio = new RtAudio(WASAPI);
   const device = pickOutputDevice(rtaudio, options.outputDeviceName);
 
@@ -85,7 +102,9 @@ export function captureSystemAudio(options: LoopbackOptions = {}): CaptureHandle
   });
   ffmpeg.on('close', (code) => {
     if (code !== 0 && code !== null && !ffmpeg.stdout.destroyed) {
-      ffmpeg.stdout.destroy(new Error(`ffmpeg (resample) fallo (codigo ${code}): ${stderr.trim()}`));
+      ffmpeg.stdout.destroy(
+        new Error(`ffmpeg (resample) fallo (codigo ${code}): ${stderr.trim()}`),
+      );
     }
   });
 
@@ -126,7 +145,10 @@ export function captureSystemAudio(options: LoopbackOptions = {}): CaptureHandle
 
 type RtDevice = ReturnType<InstanceType<typeof RtAudio>['getDevices']>[number];
 
-function pickOutputDevice(rtaudio: InstanceType<typeof RtAudio>, name: string | undefined): RtDevice {
+function pickOutputDevice(
+  rtaudio: InstanceType<typeof RtAudio>,
+  name: string | undefined,
+): RtDevice {
   const devices = rtaudio.getDevices().filter((d) => d.outputChannels > 0);
   if (devices.length === 0) {
     throw new Error('No hay ningun dispositivo de salida para capturar por loopback.');
@@ -149,8 +171,9 @@ function buildFilterArgs(options: LoopbackOptions): string[] {
   return filters.length > 0 ? ['-af', filters.join(',')] : [];
 }
 
-/** Nombres de las salidas disponibles, para elegir cual capturar. */
+/** Nombres de las salidas disponibles, para elegir cual capturar. SOLO WINDOWS. */
 export function listOutputDevices(): string[] {
+  requireWindows();
   const rtaudio = new RtAudio(WASAPI);
   return rtaudio
     .getDevices()

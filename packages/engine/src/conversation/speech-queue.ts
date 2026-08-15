@@ -9,6 +9,11 @@ import type { Speaker } from '../tts/types.js';
 export class SpeechQueue {
   private chain: Promise<void> = Promise.resolve();
   private started = false;
+  /**
+   * Cola cortada. Una vez parada no vuelve: cada turno crea la suya, asi que
+   * "reanudar" solo podria significar decir frases de una respuesta abortada.
+   */
+  private stopped = false;
 
   constructor(
     private readonly speaker: Speaker,
@@ -19,12 +24,15 @@ export class SpeechQueue {
   enqueue(text: string): void {
     const clean = text.trim();
     if (!clean) return;
+    if (this.stopped) return;
     if (!this.started) {
       this.started = true;
       this.onFirst?.();
     }
     this.chain = this.chain
-      .then(() => this.speaker.speak(clean))
+      // La comprobacion va DENTRO del eslabon, no al encolar: cuando le toque
+      // el turno a esta frase puede que ya nos hayan interrumpido.
+      .then(() => (this.stopped ? undefined : this.speaker.speak(clean)))
       // Un fallo al decir una frase no debe romper el resto de la cola, pero se
       // reporta (antes se tragaba en silencio y ocultaba fallos de voz).
       .catch((error: Error) => this.onError?.(error));
@@ -35,10 +43,17 @@ export class SpeechQueue {
     await this.chain;
   }
 
-  /** Corta lo que suena e ignora lo pendiente. */
+  /**
+   * Corta lo que suena y descarta lo pendiente.
+   *
+   * La cadena NO se reasigna: soltar la referencia (`chain = Promise.resolve()`)
+   * no cancelaba nada — las frases ya encoladas seguian su curso y, tras una
+   * interrupcion, empezaba a sonar la siguiente. Ademas drain() volvia antes de
+   * tiempo. Lo que corta de verdad es el flag que mira cada eslabon.
+   */
   stop(): void {
+    this.stopped = true;
     this.speaker.stop();
-    this.chain = Promise.resolve();
   }
 }
 

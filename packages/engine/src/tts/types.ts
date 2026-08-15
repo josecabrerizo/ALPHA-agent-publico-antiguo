@@ -7,13 +7,21 @@
  */
 export type VoiceEngine = 'edge' | 'sapi';
 
+/**
+ * Backend que de verdad esta sonando. No es lo mismo que VoiceEngine: 'sapi' es
+ * el nombre CONFIGURABLE de "la voz local del sistema", y en Linux esa voz la
+ * pone espeak-ng, no SAPI. Se separan para poder decir la verdad al mostrarlo
+ * sin cambiar el vocabulario de la configuracion ni el del puente.
+ */
+export type VoiceBackend = VoiceEngine | 'espeak';
+
 export interface Speaker {
   /** Sintetiza el texto y lo reproduce. Resuelve al terminar de sonar. */
   speak(text: string): Promise<void>;
   /** Corta la reproduccion en curso (para barge-in: interrumpir hablando). */
   stop(): void;
   /** Motor y voz activos, para mostrarlos. */
-  describe(): { engine: VoiceEngine; voice: string; local: boolean };
+  describe(): { engine: VoiceBackend; voice: string; local: boolean };
 }
 
 export interface TtsConfig {

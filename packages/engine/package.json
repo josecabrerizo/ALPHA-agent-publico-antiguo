@@ -9,6 +9,7 @@
   "scripts": {
     "build": "tsc --build",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-exclude=\"src/**/*.test.ts\" --test-coverage-exclude=\"src/spikes/**\" \"src/**/*.test.ts\"",
     "spike:stt": "tsx src/spikes/stt.ts",
     "spike:stt-file": "tsx src/spikes/stt-file.ts",
     "spike:system": "tsx src/spikes/system.ts",

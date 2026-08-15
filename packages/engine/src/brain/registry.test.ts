@@ -33,10 +33,7 @@ test('modo confidencial permite un modelo local', () => {
 test('modo confidencial BLOQUEA un modelo de nube de un proveedor local', () => {
   // gemma4:31b-cloud corre en la nube pese a ser del proveedor "ollama" (local).
   // Debe bloquearse: es el fallo que el diagnostico marco como critico.
-  assert.throws(
-    () => resolveModel('ollama/gemma4:31b-cloud', baseConfig(true)),
-    /confidencial/i,
-  );
+  assert.throws(() => resolveModel('ollama/gemma4:31b-cloud', baseConfig(true)), /confidencial/i);
 });
 
 test('modo confidencial bloquea un proveedor de nube', () => {

@@ -49,7 +49,7 @@ export class AudioGate implements AsyncIterable<Buffer> {
     if (this.waiting) {
       const resolve = this.waiting;
       this.waiting = undefined;
-      resolve({ value: undefined as unknown as Buffer, done: true });
+      resolve({ value: undefined, done: true });
     }
   }
 

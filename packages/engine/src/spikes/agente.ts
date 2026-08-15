@@ -27,8 +27,20 @@ const brain = new Brain({
 const info = brain.describe();
 console.log(`\n  A.L.P.H.A. — spike agente (con herramientas y skills)`);
 console.log(`  Modelo: ${info.provider}/${info.model} ${info.local ? '(local)' : '(nube)'}`);
-console.log(`  Herramientas: ${tools.list().map((t) => t.name).join(', ')}`);
-console.log(`  Skills: ${skills.list().map((s) => s.name).join(', ') || '(ninguna)'}`);
+console.log(
+  `  Herramientas: ${tools
+    .list()
+    .map((t) => t.name)
+    .join(', ')}`,
+);
+console.log(
+  `  Skills: ${
+    skills
+      .list()
+      .map((s) => s.name)
+      .join(', ') || '(ninguna)'
+  }`,
+);
 for (const sk of skills.skippedSkills()) console.log(`    (omitida: ${sk.name} — ${sk.reason})`);
 console.log(`  Escribe y pulsa Enter. Ctrl+C para salir.\n`);
 

@@ -1,0 +1,18 @@
+node_modules/
+dist/
+package-lock.json
+
+# Descargas de tools/fetch-whisper.mjs
+vendor/
+models/
+
+# Binarios
+assets/
+
+# Configuracion en vivo, la escribe el menu del avatar
+config/alpha.settings.json
+
+# Los YAML de configuracion son mitad documentacion: llevan los comentarios
+# alineados en columna a mano, y Prettier los pega al valor. Se pierde mas
+# legibilidad de la que se gana en uniformidad.
+config/*.yaml

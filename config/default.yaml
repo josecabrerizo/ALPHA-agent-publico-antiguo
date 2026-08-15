@@ -9,8 +9,8 @@
 
 version: 1
 
-# Modo confidencial: nada de nube durante la sesion. Es la fuente de verdad; se
-# propaga al cerebro y a la voz. La "H" de Hibrido es opcional por diseno.
+# Fallback si no se puede cargar ningun perfil. En uso normal cada avatar guarda
+# su propio `confidential` en avatars.yaml.
 confidential: false
 
 # Agente activo (identidad del avatar): vulpis | unit-a | nexus | synapse.
@@ -20,6 +20,9 @@ audio:
   device: ''        # nombre exacto del microfono; vacio = el del sistema
   gainDb: 0         # ganancia fija en dB (micros lejanos flojos)
   normalize: false  # normalizacion dinamica (dynaudnorm)
+  # false = ni se abre la captura (el indicador de micro del sistema, apagado).
+  # Lo escribe el interruptor del avatar y se conserva entre arranques.
+  micEnabled: true
 
 stt:
   model: small      # base | small | medium (small es el minimo decente en espanol)
@@ -55,10 +58,12 @@ brain:
       baseUrl: https://api.openai.com/v1
       apiKeyEnv: OPENAI_API_KEY
       local: false
+      models: [gpt-5.1, gpt-5.1-mini]
     gemini:
       baseUrl: https://generativelanguage.googleapis.com/v1beta/openai
       apiKeyEnv: GEMINI_API_KEY
       local: false
+      models: [gemini-2.5-flash, gemini-2.5-pro]
 
 tts:
   engine: edge                     # edge (neuronal, online) | sapi (local Windows)

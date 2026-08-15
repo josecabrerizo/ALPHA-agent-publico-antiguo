@@ -8,21 +8,33 @@ import {
   QAction,
   QPoint,
   QPixmap,
+  QImage,
+  QImageFormat,
+  QPainter,
   QMouseEvent,
   WidgetAttribute,
   WindowType,
   WidgetEventTypes,
   MouseButton,
   TextFormat,
+  GlobalColor,
   AspectRatioMode,
   TransformationMode,
 } from '@nodegui/nodegui';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
-import type { AvatarOption, VoiceOption } from './bridge-client.js';
+import type {
+  AvatarConfigMessage,
+  AvatarOption,
+  ModelOption,
+  VoiceOption,
+} from './bridge-client.js';
 import { log } from './log.js';
-import { STATE_CYCLE, MAX_PULSE, type AvatarState } from './states.js';
+import { STATE_CYCLE, STATE_RHYTHMS, MAX_PULSE, type AvatarState } from './states.js';
 import { AGENTS, AGENT_ORDER, type AgentId } from './agents.js';
-import { loadSettings, saveSettings, MODEL_OPTIONS, type Settings } from './settings.js';
+import { loadSettings, saveSettings, type Settings } from './settings.js';
+import { POSES, poseForState, posesDirFor, poseFile, breathAt, type Pose } from './poses.js';
+import { PoseAnimator } from './animator.js';
 
 const WIN_W = 280;
 // Zona visual del avatar: la ocupa el retrato del personaje o, si no hay imagen,
@@ -45,6 +57,20 @@ const PAD = 12; // margen lateral
 const GAP = 10; // separacion vertical entre piezas
 const INPUT_H = 34;
 const CAPTION_H = 116;
+
+/**
+ * Ritmo del bucle de animacion. 33 ms = 30 fps, de sobra para una respiracion y
+ * un fundido; componer un fotograma cuesta 0,08 ms, asi que el coste real lo
+ * pone Qt al reescalar, no nosotros.
+ */
+const FRAME_MS = 33;
+/**
+ * Cuanto crece el personaje al inspirar, en tanto por uno. Muy poco a
+ * proposito: la respiracion tiene que notarse sin que parezca que late.
+ */
+const BREATH_SCALE = 0.018;
+/** Y cuanto sube, en pixeles. Un avatar que solo escala parece un globo. */
+const BREATH_LIFT = 2.5;
 
 /**
  * Crea un submenu. Rodea un bug de NodeGui 0.74: `addMenu(titulo)` pasa al
@@ -87,6 +113,16 @@ export class AvatarWindow {
 
   /** Tamano base del retrato ya encajado; undefined = no hay imagen que pintar. */
   private portraitBase: { w: number; h: number } | undefined;
+  /**
+   * Poses ya escaladas a la caja del retrato. Se escalan UNA vez al cargar el
+   * avatar: reescalar 433x600 en cada fotograma seria tirar CPU por tener el
+   * personaje respirando.
+   */
+  private poses = new Map<Pose, QPixmap>();
+  private readonly animator = new PoseAnimator();
+  private frameTimer: NodeJS.Timeout | undefined;
+  /** Ultima mezcla pintada, para no recomponer un fotograma identico. */
+  private lastPainted = '';
   /** Perfiles que manda el motor: el es el dueno de los avatares. */
   private avatars: AvatarOption[] = [];
 
@@ -108,12 +144,16 @@ export class AvatarWindow {
 
   /** Se llama al cambiar la config en el menu, para propagarla al motor. */
   private onSettingsChanged: ((settings: Settings) => void) | undefined;
+  /** Cambios de modelo, voz y privacidad, que pertenecen a un perfil. */
+  private onAvatarSettingsChanged: ((message: AvatarConfigMessage) => void) | undefined;
 
   /** Microfonos que manda el motor; el menu "Sonido" se llena con ellos. */
   private micDevices: { name: string; isDefault: boolean }[] = [];
 
   /** Voces disponibles (SAPI locales + Edge nube). */
   private voices: VoiceOption[] = [];
+  /** Modelos disponibles, enviados por el registro autoritativo del motor. */
+  private models: ModelOption[] = [];
 
   constructor() {
     this.setupWindow();
@@ -130,13 +170,35 @@ export class AvatarWindow {
     this.win.show();
   }
 
+  /**
+   * Cambia el estado: repinta el halo y pide la pose que le toca. La pose no
+   * cambia de golpe, se funde (ver PoseAnimator), y siempre pasando por reposo.
+   */
   setState(state: AvatarState): void {
+    if (state === this.state) return;
     this.state = state;
+    this.paintOrb();
+    this.layoutVisual();
+    this.animator.goTo(poseForState(state), Date.now());
+  }
+
+  /**
+   * Gesto puntual de saludo: agita la mano y vuelve solo a reposo. No es un
+   * estado —el asistente no esta "saludando" mientras dure el turno— sino algo
+   * que ocurre una vez, cuando saluda o devuelve el saludo.
+   */
+  greet(): void {
+    if (!this.poses.has('saludo')) return;
+    this.animator.gesture('saludo', Date.now());
   }
 
   /** Registra quien recibe los cambios de config (para mandarlos al motor). */
   setOnSettingsChanged(cb: (settings: Settings) => void): void {
     this.onSettingsChanged = cb;
+  }
+
+  setOnAvatarSettingsChanged(cb: (message: AvatarConfigMessage) => void): void {
+    this.onAvatarSettingsChanged = cb;
   }
 
   /** Registra quien recibe los mensajes escritos (chat de texto). */
@@ -172,6 +234,10 @@ export class AvatarWindow {
   /** Recibe del motor la lista de voces disponibles (SAPI + Edge). */
   setVoiceOptions(list: VoiceOption[]): void {
     this.voices = list;
+  }
+
+  setModelOptions(list: ModelOption[]): void {
+    this.models = list;
   }
 
   /** Muestra texto en el bocadillo (la ventana se expande) y se esfuma sola. */
@@ -223,12 +289,7 @@ export class AvatarWindow {
    */
   private setupPortrait(): void {
     this.portrait.setParent(this.root);
-    // Las animaciones requieren CSS: inyecta las keyframes al estilo inline.
-    // La imagen se estira al tamano de la etiqueta; como las animaciones escalan
-    // ancho y alto por el mismo factor, la proporcion no se deforma.
-    this.portrait.setInlineStyle(
-      `background: transparent; ${ANIMATIONS.reposo} transition: all 0.5s ease-in-out;`,
-    );
+    this.portrait.setInlineStyle('background: transparent;');
     this.portrait.setScaledContents(true);
     this.portrait.hide();
   }
@@ -245,14 +306,12 @@ export class AvatarWindow {
     // Soporta PNG y SVG: intenta SVG primero, luego PNG como fallback.
     const basePath = path.resolve(__dirname, '..', '..', '..', 'assets', 'avatars', id);
     const svgPath = `${basePath}.svg`;
-    const pngPath = `${basePath}.png`;
     try {
-      const { existsSync } = require('node:fs');
       if (existsSync(svgPath)) return svgPath;
     } catch {
       // Si falla la busqueda de SVG, usa PNG.
     }
-    return pngPath;
+    return `${basePath}.png`;
   }
 
   /**
@@ -267,7 +326,9 @@ export class AvatarWindow {
       this.portrait.hide();
       this.paintOrb();
       this.layoutVisual();
-      log(`retrato de "${this.settings.agent}" no disponible (${file || 'sin ruta'}); se usa el orbe`);
+      log(
+        `retrato de "${this.settings.agent}" no disponible (${file || 'sin ruta'}); se usa el orbe`,
+      );
       return;
     }
     const scaled = pixmap.scaled(
@@ -279,10 +340,108 @@ export class AvatarWindow {
     this.portraitBase = { w: scaled.width(), h: scaled.height() };
     this.portrait.setPixmap(scaled);
     this.portrait.show();
+    this.loadPoses(file);
     this.paintOrb();
     this.layoutVisual();
-    const isSvg = file.endsWith('.svg');
-    log(`retrato: ${this.settings.agent} (${scaled.width()}×${scaled.height()})${isSvg ? ' [SVG animado]' : ''}`);
+    log(`retrato: ${this.settings.agent} (${scaled.width()}×${scaled.height()})`);
+  }
+
+  /**
+   * Carga las poses del avatar, si las tiene. Viven en la carpeta hermana del
+   * retrato (unit-a.png -> unit-a/), asi que un avatar sin poses simplemente no
+   * tiene carpeta y se queda con su imagen fija: nada se rompe por no tenerlas.
+   *
+   * Se exigen TODAS o ninguna. Con un juego a medias, una transicion se quedaria
+   * sin uno de sus extremos y el personaje desapareceria a mitad del fundido.
+   */
+  private loadPoses(portraitFile: string): void {
+    this.poses.clear();
+    const dir = posesDirFor(portraitFile);
+    const cargadas = new Map<Pose, QPixmap>();
+    for (const pose of POSES) {
+      const file = poseFile(dir, pose);
+      const pix = new QPixmap();
+      if (!existsSync(file) || !pix.load(file)) return this.sinPoses(dir);
+      cargadas.set(
+        pose,
+        pix.scaled(
+          PORTRAIT_MAX_W,
+          PORTRAIT_MAX_H,
+          AspectRatioMode.KeepAspectRatio,
+          TransformationMode.SmoothTransformation,
+        ),
+      );
+    }
+    this.poses = cargadas;
+    // El tamano lo marcan las poses, que estan todas en el mismo lienzo; asi el
+    // personaje no cambia de escala al cambiar de pose.
+    const base = cargadas.get('reposo');
+    if (base) this.portraitBase = { w: base.width(), h: base.height() };
+    this.startFrames();
+    log(`poses de ${this.settings.agent}: ${[...cargadas.keys()].join(', ')}`);
+  }
+
+  private sinPoses(dir: string): void {
+    this.poses.clear();
+    this.stopFrames();
+    log(`sin poses para "${this.settings.agent}" (${dir}); retrato fijo`);
+  }
+
+  /** Arranca el bucle de animacion. Idempotente. */
+  private startFrames(): void {
+    if (this.frameTimer) return;
+    this.frameTimer = setInterval(() => this.tick(), FRAME_MS);
+    // Que el temporizador no impida cerrar el proceso.
+    this.frameTimer.unref?.();
+  }
+
+  private stopFrames(): void {
+    if (!this.frameTimer) return;
+    clearInterval(this.frameTimer);
+    this.frameTimer = undefined;
+  }
+
+  /**
+   * Un fotograma. La respiracion es SIEMPRE (mueve la geometria, que es barato)
+   * y la mezcla de poses solo cuando hay fundido en curso: en reposo no se
+   * recompone ningun pixel.
+   */
+  private tick(): void {
+    if (this.poses.size === 0) return;
+    const now = Date.now();
+    const frame = this.animator.frameAt(now);
+
+    const clave = frame.moving ? `${frame.from}>${frame.to}@${frame.mix.toFixed(3)}` : frame.to;
+    if (clave !== this.lastPainted) {
+      this.lastPainted = clave;
+      const pix = frame.moving
+        ? this.blend(frame.from, frame.to, frame.mix)
+        : this.poses.get(frame.to);
+      if (pix) this.portrait.setPixmap(pix);
+    }
+
+    this.layoutVisual(breathAt(now, STATE_RHYTHMS[this.state].breatheMs));
+  }
+
+  /**
+   * Mezcla dos poses en una sola imagen. Como estan alineadas por la cabeza y
+   * los pies, el torso queda solido y solo se difuminan los brazos: se lee como
+   * desenfoque de movimiento y no como una disolvencia.
+   */
+  private blend(from: Pose, to: Pose, mix: number): QPixmap | undefined {
+    const a = this.poses.get(from);
+    const b = this.poses.get(to);
+    if (!a || !b) return undefined;
+    const img = new QImage(a.width(), a.height(), QImageFormat.ARGB32_Premultiplied);
+    img.fill(GlobalColor.transparent);
+    const p = new QPainter();
+    if (!p.begin(img)) return undefined;
+    p.setOpacity(1 - mix);
+    p.drawPixmap(0, 0, a);
+    p.setOpacity(mix);
+    p.drawPixmap(0, 0, b);
+    p.end();
+    return QPixmap.fromImage(img, 0);
   }
 
   /** Bocadillo de texto bajo el orbe. Oculto hasta que llega algo que decir. */
@@ -355,19 +514,32 @@ export class AvatarWindow {
   }
 
   /**
+   * Intensidad del halo segun el estado, en 0..1. Sale de la amplitud del
+   * pulso: el estado mas "nervioso" es tambien el que mas se enciende, asi que
+   * la escala ya estaba definida en states.ts y no hay una segunda verdad.
+   */
+  private stateGlow(): number {
+    return STATE_RHYTHMS[this.state].pulse / MAX_PULSE;
+  }
+
+  /**
    * Estilo del orbe con el color del agente activo. Con retrato pasa a ser un
-   * halo tenue detras del personaje; sin el, es la cara del asistente.
+   * halo tenue detras del personaje; sin el, es la cara del asistente. El
+   * ESTADO modula cuanto se enciende (ver stateGlow).
    */
   private paintOrb(): void {
     const [r, g, b] = AGENTS[this.settings.agent].color;
     const lighten = (c: number) => Math.min(255, c + 45);
     const darken = (c: number) => Math.round(c * 0.5);
+    // Reposo no se apaga del todo (0.6) o el avatar pareceria desconectado.
+    const glow = 0.6 + 0.4 * this.stateGlow();
+    const a = (alpha: number) => Math.round(alpha * glow);
     if (this.portraitBase) {
       this.orb.setInlineStyle(`
         background: qradialgradient(
           cx: 0.5, cy: 0.5, radius: 0.5, fx: 0.5, fy: 0.5,
-          stop: 0 rgba(${lighten(r)}, ${lighten(g)}, ${lighten(b)}, 110),
-          stop: 0.6 rgba(${r}, ${g}, ${b}, 55),
+          stop: 0 rgba(${lighten(r)}, ${lighten(g)}, ${lighten(b)}, ${a(110)}),
+          stop: 0.6 rgba(${r}, ${g}, ${b}, ${a(55)}),
           stop: 1 rgba(${darken(r)}, ${darken(g)}, ${darken(b)}, 0)
         );
         border-radius: ${CIRCLE_RADIUS}px;
@@ -378,12 +550,12 @@ export class AvatarWindow {
       background: qradialgradient(
         cx: 0.5, cy: 0.42, radius: 0.75,
         fx: 0.5, fy: 0.42,
-        stop: 0 rgba(${lighten(r)}, ${lighten(g)}, ${lighten(b)}, 245),
-        stop: 0.55 rgba(${r}, ${g}, ${b}, 225),
-        stop: 1 rgba(${darken(r)}, ${darken(g)}, ${darken(b)}, 90)
+        stop: 0 rgba(${lighten(r)}, ${lighten(g)}, ${lighten(b)}, ${a(245)}),
+        stop: 0.55 rgba(${r}, ${g}, ${b}, ${a(225)}),
+        stop: 1 rgba(${darken(r)}, ${darken(g)}, ${darken(b)}, ${a(90)})
       );
       border-radius: ${CIRCLE_RADIUS}px;
-      border: 2px solid rgba(255, 255, 255, 60);
+      border: 2px solid rgba(255, 255, 255, ${a(60) + 20});
     `);
   }
 
@@ -428,7 +600,11 @@ export class AvatarWindow {
     this.onSettingsChanged?.(this.settings);
   }
 
-  private action(text: string, onTrigger: () => void, opts: { checked?: boolean; enabled?: boolean } = {}): QAction {
+  private action(
+    text: string,
+    onTrigger: () => void,
+    opts: { checked?: boolean; enabled?: boolean } = {},
+  ): QAction {
     const a = new QAction();
     a.setText(text);
     if (opts.checked !== undefined) {
@@ -448,38 +624,67 @@ export class AvatarWindow {
     this.menuRefs = [menu];
 
     const active = this.avatars.find((a) => a.id === this.settings.agent);
-    const title = this.action(`A.L.P.H.A. — ${active?.name ?? AGENTS[this.settings.agent].label}`, () => {}, {
-      enabled: false,
-    });
+    const title = this.action(
+      `A.L.P.H.A. — ${active?.name ?? AGENTS[this.settings.agent].label}`,
+      () => {},
+      {
+        enabled: false,
+      },
+    );
     menu.addAction(title);
     menu.addSeparator();
 
-    // Avatar. Los perfiles los manda el motor (personalidad, voz, modelo e
-    // imagen viven ahi); si aun no ha conectado, se cae a la lista local.
+    // Cada avatar es un perfil completo. Modelo, voz y privacidad se editan
+    // dentro de su submenu y el motor los persiste en avatars.yaml.
     const avatarMenu = addSubmenu(menu, 'Avatar');
     this.menuRefs.push(avatarMenu);
-    for (const opt of this.avatarChoices()) {
-      // En modo confidencial solo se ofrecen los avatares que trabajan en local.
-      const blocked = this.settings.confidential && !opt.local;
-      const label = `${opt.name} — ${opt.role}${opt.local ? '' : '  (nube)'}`;
-      avatarMenu.addAction(
-        this.action(label, () => this.update({ agent: opt.id as AgentId }), {
-          checked: this.settings.agent === opt.id,
-          enabled: !blocked,
+    for (const profile of this.avatarChoices()) {
+      const profileMenu = addSubmenu(
+        avatarMenu,
+        `${profile.name} — ${profile.role}${profile.confidential ? '  (confidencial)' : ''}`,
+      );
+      this.menuRefs.push(profileMenu);
+      profileMenu.addAction(
+        this.action('Usar este avatar', () => this.update({ agent: profile.id as AgentId }), {
+          checked: this.settings.agent === profile.id,
         }),
       );
-    }
 
-    // Modelo
-    const modelMenu = addSubmenu(menu, 'Modelo');
-    this.menuRefs.push(modelMenu);
-    for (const opt of MODEL_OPTIONS) {
-      // En modo confidencial, los modelos de nube quedan deshabilitados.
-      const blocked = this.settings.confidential && !opt.local;
-      modelMenu.addAction(
-        this.action(opt.label, () => this.update({ model: opt.ref }), {
-          checked: this.settings.model === opt.ref,
-          enabled: !blocked,
+      const modelMenu = addSubmenu(profileMenu, 'Modelo');
+      this.menuRefs.push(modelMenu);
+      if (this.models.length === 0) {
+        modelMenu.addAction(this.action('(motor no conectado)', () => {}, { enabled: false }));
+      } else {
+        for (const option of this.models) {
+          modelMenu.addAction(
+            this.action(option.label, () => this.changeAvatar(profile.id, { model: option.ref }), {
+              checked: profile.model === option.ref,
+              enabled: !profile.confidential || option.local,
+            }),
+          );
+        }
+      }
+
+      const voiceMenu = addSubmenu(profileMenu, 'Voz');
+      this.menuRefs.push(voiceMenu);
+      if (this.voices.length === 0) {
+        voiceMenu.addAction(this.action('(enumerando voces...)', () => {}, { enabled: false }));
+      } else {
+        const currentVoiceId = `${profile.voice.engine}:${profile.voice.name}`;
+        for (const option of this.voices) {
+          voiceMenu.addAction(
+            this.action(option.name, () => this.changeAvatar(profile.id, { voiceId: option.id }), {
+              checked: currentVoiceId === option.id,
+              enabled: !profile.confidential || option.local,
+            }),
+          );
+        }
+      }
+
+      profileMenu.addSeparator();
+      profileMenu.addAction(
+        this.action('Modo confidencial (sin nube)', () => this.toggleAvatarConfidential(profile), {
+          checked: profile.confidential,
         }),
       );
     }
@@ -502,36 +707,6 @@ export class AvatarWindow {
       }
     }
 
-    // Voz del avatar actual: permite cambiarla entre las disponibles
-    const voiceMenu = addSubmenu(menu, 'Voz del avatar');
-    this.menuRefs.push(voiceMenu);
-    if (this.voices.length === 0) {
-      voiceMenu.addAction(
-        this.action('(enumerando voces...)', () => {}, { enabled: false }),
-      );
-    } else {
-      // Buscar la voz del avatar actual o la guardada en settings
-      const currentVoiceId = this.settings.voiceId;
-      for (const v of this.voices) {
-        // En confidencial, solo se ofrecen voces locales
-        const blocked = this.settings.confidential && !v.local;
-        voiceMenu.addAction(
-          this.action(v.name, () => this.update({ voiceId: v.id }), {
-            checked: v.id === currentVoiceId,
-            enabled: !blocked,
-          }),
-        );
-      }
-    }
-
-    // Privacidad
-    menu.addSeparator();
-    menu.addAction(
-      this.action('Modo confidencial (sin nube)', () => this.toggleConfidential(), {
-        checked: this.settings.confidential,
-      }),
-    );
-
     // Salir
     menu.addSeparator();
     menu.addAction(this.action('Salir', () => this.win.close()));
@@ -552,48 +727,66 @@ export class AvatarWindow {
       id,
       name: AGENTS[id].label,
       role: AGENTS[id].tagline,
-      local: true,
+      model: '',
+      confidential: true,
+      voice: { engine: 'sapi', name: '', rate: 0 },
       image: '',
     }));
   }
 
-  private toggleConfidential(): void {
-    const confidential = !this.settings.confidential;
-    // Al activar confidencial con un modelo de nube seleccionado, se cae al
-    // modelo local por defecto para no quedar en un estado imposible.
-    const current = MODEL_OPTIONS.find((m) => m.ref === this.settings.model);
-    const model =
-      confidential && current && !current.local
-        ? (MODEL_OPTIONS.find((m) => m.local)?.ref ?? this.settings.model)
-        : this.settings.model;
-    // Lo mismo con el avatar: uno de nube no puede seguir puesto en modo
-    // confidencial, asi que se propone el primero que trabaje solo en local.
-    const avatar = this.avatars.find((a) => a.id === this.settings.agent);
-    const agent =
-      confidential && avatar && !avatar.local
-        ? ((this.avatars.find((a) => a.local)?.id as AgentId | undefined) ?? this.settings.agent)
-        : this.settings.agent;
-    this.update({ confidential, model, agent });
+  private changeAvatar(avatarId: string, settings: AvatarConfigMessage['settings']): void {
+    this.onAvatarSettingsChanged?.({ type: 'avatar-config', avatarId, settings });
+  }
+
+  private toggleAvatarConfidential(profile: AvatarOption): void {
+    const confidential = !profile.confidential;
+    const model = this.models.find((option) => option.ref === profile.model);
+    const voiceId = `${profile.voice.engine}:${profile.voice.name}`;
+    const voice = this.voices.find((option) => option.id === voiceId);
+    const settings: AvatarConfigMessage['settings'] = { confidential };
+    // Al activar el modo se elige una combinacion local valida en el mismo
+    // comando; nunca se persiste un perfil confidencial que use la nube.
+    if (confidential && (!model || !model.local)) {
+      const fallback = this.models.find((option) => option.local);
+      if (fallback) settings.model = fallback.ref;
+    }
+    if (confidential && (!voice || !voice.local)) {
+      const fallback = this.voices.find((option) => option.local);
+      if (fallback) settings.voiceId = fallback.id;
+    }
+    this.changeAvatar(profile.id, settings);
   }
 
   /**
-   * Coloca retrato y halo. Es estatico a proposito: la respiracion sinusoidal
-   * anterior se ha quitado y el dinamismo se replanteara mas adelante.
+   * Coloca retrato y halo. El TAMANO del halo depende del estado —es lo que
+   * hace distinguibles escuchando, pensando y hablando de un vistazo— y el
+   * retrato respira: `breath` (-1..1) lo escala y lo levanta un poco.
+   *
+   * La respiracion se hace moviendo la GEOMETRIA, no repintando pixeles: la
+   * etiqueta tiene setScaledContents, asi que Qt reescala el pixmap ya cargado.
+   * Sale gratis comparado con recomponer la imagen en cada fotograma.
    */
-  private layoutVisual(): void {
+  private layoutVisual(breath = 0): void {
+    const radius = BASE_RADIUS + STATE_RHYTHMS[this.state].pulse;
     this.orb.setGeometry(
-      Math.round(ORB_CX - BASE_RADIUS),
-      Math.round(ORB_CY - BASE_RADIUS),
-      BASE_RADIUS * 2,
-      BASE_RADIUS * 2,
+      Math.round(ORB_CX - radius),
+      Math.round(ORB_CY - radius),
+      radius * 2,
+      radius * 2,
     );
     if (!this.portraitBase) return;
-    // Anclado por abajo: los pies del personaje quedan al ras del bocadillo.
     const { w, h } = this.portraitBase;
-    this.portrait.setGeometry(Math.round(ORB_CX - w / 2), VISUAL_BOTTOM - h, w, h);
+    const escala = 1 + BREATH_SCALE * breath;
+    const bw = Math.round(w * escala);
+    const bh = Math.round(h * escala);
+    const alza = Math.round(BREATH_LIFT * breath);
+    // Anclado por abajo: los pies del personaje quedan al ras del bocadillo, y
+    // al inspirar crece hacia ARRIBA en vez de hundirse en el suelo.
+    this.portrait.setGeometry(Math.round(ORB_CX - bw / 2), VISUAL_BOTTOM - bh - alza, bw, bh);
   }
 
   dispose(): void {
     if (this.captionTimer) clearTimeout(this.captionTimer);
+    this.stopFrames();
   }
 }

@@ -28,11 +28,9 @@ export class EdgeSpeaker implements Speaker {
     const tts = new MsEdgeTTS();
     await tts.setMetadata(this.voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
 
-    const ffplay = spawn(
-      'ffplay',
-      ['-nodisp', '-autoexit', '-loglevel', 'error', '-i', 'pipe:0'],
-      { stdio: ['pipe', 'ignore', 'ignore'] },
-    );
+    const ffplay = spawn('ffplay', ['-nodisp', '-autoexit', '-loglevel', 'error', '-i', 'pipe:0'], {
+      stdio: ['pipe', 'ignore', 'ignore'],
+    });
     this.player = ffplay;
 
     // La escala -10..10 de SAPI se traduce a porcentaje de prosody, para que la
@@ -40,7 +38,7 @@ export class EdgeSpeaker implements Speaker {
     const percent = Math.max(-100, Math.min(100, Math.round(this.rate * 10)));
     const { audioStream } = tts.toStream(clean, {
       rate: `${percent >= 0 ? '+' : ''}${percent}%`,
-    } as never);
+    });
 
     await new Promise<void>((resolve, reject) => {
       audioStream.on('data', (chunk: Buffer) => {

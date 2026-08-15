@@ -13,15 +13,26 @@ import { Brain } from '../brain/client.js';
 import { ToolRegistry } from '../brain/tools/registry.js';
 import { BUILTIN_TOOLS } from '../brain/tools/builtin.js';
 import { SkillLibrary } from '../brain/skills/library.js';
-import { skillsDir } from '../paths.js';
+import { skillsDir, whisperModel } from '../paths.js';
 import { createSpeaker } from '../tts/speaker.js';
-import { getAvailableVoices, resolveVoiceId } from '../tts/voices.js';
+import { getAvailableVoices } from '../tts/voices.js';
 import { listInputDevices, defaultInputDevice } from '../audio/devices.js';
 import { toDbfs } from '../audio/format.js';
 import { loadConfig } from '../config/loader.js';
-import { loadAvatars, type AvatarProfile } from '../config/avatars.js';
+import {
+  loadAvatars,
+  saveAvatarProfile,
+  type AvatarProfile,
+  type AvatarProfilePatch,
+} from '../config/avatars.js';
 import { ConversationSession, type ConversationState } from '../conversation/session.js';
-import { AvatarBridge, AVATAR_BRIDGE_PORT } from '../conversation/avatar-bridge.js';
+import {
+  AvatarBridge,
+  AVATAR_BRIDGE_PORT,
+  type AlphaConfigMessage,
+  type AvatarConfigMessage,
+  type ModelOption,
+} from '../conversation/avatar-bridge.js';
 
 /** Marca de tiempo estilo Java: HH:MM:SS.mmm. */
 function stamp(): string {
@@ -36,29 +47,38 @@ function log(message: string): void {
 // Config unificada: defaults ← default.yaml ← local.yaml ← ajustes del avatar.
 // El entorno solo sobreescribe para pruebas puntuales.
 const config = loadConfig();
-let confidential = process.env['ALPHA_CONFIDENCIAL'] === '1' || config.confidential;
+const confidentialForced = process.env['ALPHA_CONFIDENCIAL'] === '1';
 
 // El avatar es un PERFIL: manda sobre modelo, voz y personalidad del asistente.
-const avatars = loadAvatars();
+let avatars = loadAvatars();
 const avatarById = (id: string): AvatarProfile | undefined => avatars.find((a) => a.id === id);
-let avatar = avatarById(config.agent);
-// En confidencial solo valen los avatares locales; si el guardado no lo es, se
-// cae al primero que si lo sea (el motor lo exige, no solo el menu).
-if (confidential && avatar && !avatar.local) {
-  const fallback = avatars.find((a) => a.local);
+let avatar = avatarById(config.agent) ?? avatars[0];
+let confidential = confidentialForced || (avatar?.confidential ?? config.confidential);
+// El override de entorno manda sobre el perfil. Si el avatar activo no esta
+// preparado para confidencial, se usa uno que si lo este.
+if (confidentialForced && avatar && !avatar.confidential) {
+  const fallback = avatars.find((a) => a.confidential);
   if (fallback) avatar = fallback;
 }
 let model = process.env['ALPHA_MODEL'] ?? avatar?.model ?? config.brain.model;
 
 const captureOptions = {
   device: process.env['ALPHA_AUDIO_DEVICE'] ?? config.audio.device,
-  gainDb: process.env['ALPHA_MIC_GAIN'] ? Number(process.env['ALPHA_MIC_GAIN']) : config.audio.gainDb,
+  gainDb: process.env['ALPHA_MIC_GAIN']
+    ? Number(process.env['ALPHA_MIC_GAIN'])
+    : config.audio.gainDb,
   normalize: process.env['ALPHA_MIC_NORMALIZE'] === '1' || config.audio.normalize,
 };
 // device vacio = el predeterminado del sistema; ffmpeg necesita el nombre real.
 if (!captureOptions.device) captureOptions.device = (await defaultInputDevice()).name;
 
-const whisper = new WhisperTranscriber({ language: config.stt.language });
+// El tamano del modelo sale de la config (stt.model). Antes solo se pasaba el
+// idioma, asi que la opcion existia, se validaba y no la usaba nadie: siempre
+// se transcribia con "small".
+const whisper = new WhisperTranscriber({
+  language: config.stt.language,
+  modelPath: whisperModel(config.stt.model),
+});
 const skills = new SkillLibrary(skillsDir);
 await skills.load();
 const tools = new ToolRegistry().registerAll(BUILTIN_TOOLS).registerAll(skills.tools());
@@ -81,28 +101,13 @@ const makeBrain = (m: string, conf: boolean, av: AvatarProfile | undefined) =>
   });
 const makeSpeaker = (conf: boolean, av: AvatarProfile | undefined) =>
   createSpeaker({
-    engine: (process.env['ALPHA_TTS_ENGINE'] as 'edge' | 'sapi') ?? av?.voice.engine ?? config.tts.engine,
+    engine:
+      (process.env['ALPHA_TTS_ENGINE'] as 'edge' | 'sapi') ?? av?.voice.engine ?? config.tts.engine,
     edgeVoice: av?.voice.engine === 'edge' ? av.voice.name : config.tts.edgeVoice,
     sapiVoice: av?.voice.engine === 'sapi' ? av.voice.name : config.tts.sapiVoice,
     rate: av?.voice.rate ?? config.tts.rate,
     confidential: conf,
   });
-
-/**
- * Crea un speaker con una voz específica elegida por el usuario (voiceId).
- * Se usa cuando el avatar cambia la voz desde el menú de configuración.
- */
-const makeSpeakerForVoice = async (voiceId: string, conf: boolean) => {
-  const v = await resolveVoiceId(voiceId, availableVoices);
-  if (!v) throw new Error(`Voz desconocida: "${voiceId}"`);
-  return createSpeaker({
-    engine: v.engine,
-    edgeVoice: v.engine === 'edge' ? v.name : config.tts.edgeVoice,
-    sapiVoice: v.engine === 'sapi' ? v.name : config.tts.sapiVoice,
-    rate: config.tts.rate, // sin cambio de ritmo al cambiar voz
-    confidential: conf,
-  });
-};
 
 let brain = makeBrain(model, confidential, avatar);
 let speaker = makeSpeaker(confidential, avatar);
@@ -111,13 +116,38 @@ const brainInfo = brain.describe();
 const voiceInfo = speaker.describe();
 console.log(`\n  A.L.P.H.A. — conversacion completa`);
 console.log(
-  `  Avatar:    ${avatar ? `${avatar.name} — ${avatar.role} ${avatar.local ? '(solo local)' : '(usa nube)'}` : '(ninguno)'}`,
+  `  Avatar:    ${avatar ? `${avatar.name} — ${avatar.role}${avatar.confidential ? ' (confidencial)' : ''}` : '(ninguno)'}`,
 );
-console.log(`  Microfono: ${captureOptions.device}${captureOptions.gainDb ? ` (+${captureOptions.gainDb} dB)` : ''}`);
-console.log(`  Cerebro:   ${brainInfo.provider}/${brainInfo.model} ${brainInfo.local ? '(local)' : '(nube)'}`);
-console.log(`  Voz:       ${voiceInfo.engine}/${voiceInfo.voice} ${voiceInfo.local ? '(local)' : '(nube)'}`);
-console.log(`  Herramientas: ${tools.list().map((t) => t.name).join(', ')}`);
-console.log(`  Skills: ${skills.list().map((s) => s.name).join(', ') || '(ninguna)'}`);
+console.log(
+  `  Microfono: ${captureOptions.device}${captureOptions.gainDb ? ` (+${captureOptions.gainDb} dB)` : ''}${config.audio.micEnabled ? '' : '  — SILENCIADO (guardado)'}`,
+);
+console.log(`  Whisper:   modelo ${config.stt.model}, idioma ${config.stt.language}`);
+console.log(
+  `  Cerebro:   ${brainInfo.provider}/${brainInfo.model} ${brainInfo.local ? '(local)' : '(nube)'}`,
+);
+console.log(
+  `  Voz:       ${voiceInfo.engine}/${voiceInfo.voice} ${voiceInfo.local ? '(local)' : '(nube)'}`,
+);
+console.log(
+  `  Herramientas: ${tools
+    .list()
+    .map((t) => t.name)
+    .join(', ')}`,
+);
+console.log(
+  `  Skills: ${
+    skills
+      .list()
+      .map((s) => s.name)
+      .join(', ') || '(ninguna)'
+  }`,
+);
+// Las omitidas se DICEN. Sobre todo las que estan en cuarentena: una skill que
+// escribio el agente y nadie ha aprobado no hace nada, y sin este aviso el
+// usuario no se enteraria ni de que existe ni de que hay algo que revisar.
+for (const sk of skills.skippedSkills()) {
+  console.log(`     · omitida "${sk.name}": ${sk.reason}`);
+}
 console.log(
   `  Interrupcion: ${config.conversation.bargeIn ? `si (puedes cortarle hablando, desde ${config.conversation.bargeInMinMs}ms de habla)` : 'no'}`,
 );
@@ -134,11 +164,15 @@ console.log(
   bridgeUp
     ? `  Avatar: escuchando en 127.0.0.1:${bridgePort} (lanza "npm run avatar" para verlo)`
     : `  Avatar: PUERTO ${bridgePort} OCUPADO (¿otro motor corriendo?) — este motor no tendra avatar.\n` +
-      `          Para levantar otra instancia: ALPHA_BRIDGE_PORT=43118 npm run spike:conversar`,
+        `          Para levantar otra instancia: ALPHA_BRIDGE_PORT=43118 npm run spike:conversar`,
 );
 console.log(`  Habla cuando quieras. Ctrl+C para salir.\n`);
 
-const ICON: Record<ConversationState, string> = { escuchando: '👂', pensando: '🧠', hablando: '🗣️' };
+const ICON: Record<ConversationState, string> = {
+  escuchando: '👂',
+  pensando: '🧠',
+  hablando: '🗣️',
+};
 
 // Seguimiento del estado actual para el heartbeat: cuanto lleva asi.
 let state: ConversationState = 'escuchando';
@@ -173,7 +207,9 @@ const session = new ConversationSession({
       // Solo en escuchando y como mucho cada segundo, para no inundar.
       if (state === 'escuchando' && now - lastLevelLog > 1000) {
         const db = toDbfs(peak);
-        log(`   micro: pico ${db === -Infinity ? '−∞' : db.toFixed(0)} dBFS${speaking ? '  (voz)' : ''}`);
+        log(
+          `   micro: pico ${db === -Infinity ? '−∞' : db.toFixed(0)} dBFS${speaking ? '  (voz)' : ''}`,
+        );
         peak = 0;
         lastLevelLog = now;
       }
@@ -196,11 +232,18 @@ const session = new ConversationSession({
   },
 });
 
+// El mute es un ajuste persistido, no un estado de la sesion: si se dejo el
+// microfono cerrado, se arranca cerrado (y el indicador del sistema, apagado).
+if (!config.audio.micEnabled) session.setMicEnabled(false);
+
 // Manda al avatar la lista de microfonos disponibles (al arrancar y cada vez
 // que un avatar se conecta), marcando el activo.
 async function sendDevices(): Promise<void> {
   try {
-    const inputs = (await listInputDevices()).map((d) => ({ name: d.name, isDefault: d.isDefault }));
+    const inputs = (await listInputDevices()).map((d) => ({
+      name: d.name,
+      isDefault: d.isDefault,
+    }));
     bridge.broadcast({ type: 'devices', inputs, current: currentMic });
   } catch (err) {
     log(`✗ [devices] ${(err as Error).message}`);
@@ -215,11 +258,30 @@ function sendAvatars(): void {
       id: a.id,
       name: a.name,
       role: a.role,
-      local: a.local,
+      model: a.model,
+      confidential: a.confidential,
+      voice: a.voice,
       image: a.image,
     })),
     ...(avatar ? { current: avatar.id } : {}),
   });
+}
+
+/** El catalogo del menu sale del mismo registro que valida el motor. */
+const modelOptions: ModelOption[] = Object.entries(config.brain.providers).flatMap(
+  ([providerId, provider]) =>
+    (provider.models ?? []).map((name) => {
+      const local = provider.local && !(provider.cloudModels ?? []).includes(name);
+      return {
+        ref: `${providerId}/${name}`,
+        label: `${name} (${providerId}${local ? ', local' : ', nube'})`,
+        local,
+      };
+    }),
+);
+
+function sendModels(): void {
+  bridge.broadcast({ type: 'models', list: modelOptions });
 }
 
 // Voces disponibles en el sistema (SAPI locales + Edge en la nube).
@@ -239,39 +301,56 @@ async function sendVoices(): Promise<void> {
   bridge.broadcast({ type: 'voices', list: availableVoices });
 }
 
-bridge.onClientConnect(async () => {
+/** Todo lo que hay que mandarle a un avatar recien autenticado. */
+async function greetClient(): Promise<void> {
   void sendDevices();
   sendAvatars();
+  sendModels();
   await sendVoices();
+}
+
+// Los manejadores del puente son sincronos (devuelven void): si se les pasa una
+// funcion async, un fallo dentro se convierte en un rechazo que nadie recoge y
+// tumba el proceso. Por eso se llama a la version async y se atrapa aqui.
+bridge.onClientConnect(() => {
+  greetClient().catch((err: unknown) => log(`✗ [avatar] ${(err as Error).message}`));
 });
 void sendDevices();
 
 // Chat escrito desde el avatar: se responde como a la voz, mismo historial.
-bridge.onTextInput((text) => void session.sendText(text));
+bridge.onTextInput((text) => {
+  session.sendText(text).catch((err: unknown) => log(`✗ [texto] ${(err as Error).message}`));
+});
 
 // Cambios de configuracion desde el avatar (modelo, privacidad, microfono): se
 // aplican en caliente sin cortar la sesion.
-bridge.onConfigMessage(async (msg) => {
+bridge.onConfigMessage((msg) => {
+  applyConfig(msg).catch((err: unknown) => {
+    const message = (err as Error).message;
+    log(`✗ [config] ${message}`);
+    bridge.broadcast({ type: 'config-error', message });
+    sendAvatars();
+  });
+});
+
+bridge.onAvatarConfigMessage((msg) => {
+  applyAvatarConfig(msg).catch((err: unknown) => {
+    const message = (err as Error).message;
+    log(`✗ [avatar-config] ${message}`);
+    bridge.broadcast({ type: 'config-error', message });
+    // Confirmacion autoritativa: ante un rechazo la UI vuelve a pintar lo que
+    // de verdad sigue guardado y no conserva una seleccion optimista.
+    sendAvatars();
+  });
+});
+
+async function applyConfig(msg: AlphaConfigMessage): Promise<void> {
   const s = msg.settings;
 
   // Silenciar el microfono: independiente del resto: sigue valiendo el chat
   // escrito y no toca modelo, voz ni avatar.
   if (typeof s.micEnabled === 'boolean' && s.micEnabled !== session.isMicEnabled()) {
     session.setMicEnabled(s.micEnabled);
-  }
-
-  // Cambio de voz: independiente, no requiere reiniciar nada.
-  if (typeof s.voiceId === 'string' && s.voiceId) {
-    try {
-      const nextSpeaker = await makeSpeakerForVoice(s.voiceId, confidential);
-      speaker.stop();
-      speaker = nextSpeaker;
-      session.reconfigure({ speaker });
-      const voiceInfo = speaker.describe();
-      log(`⚙️  voz: ${voiceInfo.voice}`);
-    } catch (err) {
-      log(`✗ [voz] ${(err as Error).message}`);
-    }
   }
 
   // Microfono: reinicia la captura con el nuevo dispositivo. Se deja que
@@ -282,67 +361,98 @@ bridge.onConfigMessage(async (msg) => {
     log(`⚙️  microfono desde el avatar: ${s.audioDevice}`);
   }
 
-  const nextConfidential = typeof s.confidential === 'boolean' ? s.confidential : confidential;
+  if (!s.agent || s.agent === avatar?.id) return;
+  const nextAvatar = avatarById(s.agent);
+  if (!nextAvatar) throw new Error(`avatar desconocido: "${s.agent}"`);
+  activateAvatar(nextAvatar);
+}
 
-  // Cambio de AVATAR: su perfil manda sobre modelo, voz y personalidad.
-  let nextAvatar = avatar;
-  if (s.agent && s.agent !== avatar?.id) {
-    const candidate = avatarById(s.agent);
-    if (!candidate) {
-      log(`✗ [config] avatar desconocido: "${s.agent}"`);
-      return;
-    }
-    // Contrato de privacidad: en confidencial solo avatares locales.
-    if (nextConfidential && !candidate.local) {
-      log(`✗ [config] "${candidate.name}" usa la nube y el modo confidencial esta activo — no se aplica`);
-      return;
-    }
-    nextAvatar = candidate;
+/** Valida y activa un perfil completo: sus tres opciones viajan juntas. */
+function activateAvatar(nextAvatar: AvatarProfile): void {
+  const nextConfidential = confidentialForced || nextAvatar.confidential;
+  const nextModel = process.env['ALPHA_MODEL'] ?? nextAvatar.model;
+  const nextBrain = makeBrain(nextModel, nextConfidential, nextAvatar);
+  const info = nextBrain.describe();
+  const nextSpeaker = makeSpeaker(nextConfidential, nextAvatar);
+  const voiceInfo = nextSpeaker.describe();
+
+  brain = nextBrain;
+  speaker = nextSpeaker;
+  model = nextModel;
+  confidential = nextConfidential;
+  avatar = nextAvatar;
+  session.reconfigure({ brain, speaker });
+  sendAvatars();
+  log(
+    `⚙️  ${nextAvatar.name} · ${info.provider}/${info.model} · voz ${voiceInfo.voice}${confidential ? ' · confidencial' : ''}`,
+  );
+}
+
+/** Cambia una opcion de un perfil, la guarda en avatars.yaml y la aplica si esta activo. */
+async function applyAvatarConfig(msg: AvatarConfigMessage): Promise<void> {
+  await voicesReady;
+  const current = avatarById(msg.avatarId);
+  if (!current) throw new Error(`avatar desconocido: "${msg.avatarId}"`);
+
+  const nextModel = msg.settings.model ?? current.model;
+  const modelOption = modelOptions.find((option) => option.ref === nextModel);
+  if (!modelOption) throw new Error(`modelo desconocido: "${nextModel}"`);
+
+  const currentVoiceId = `${current.voice.engine}:${current.voice.name}`;
+  const nextVoiceId = msg.settings.voiceId ?? currentVoiceId;
+  const voiceOption = availableVoices.find((option) => option.id === nextVoiceId);
+  // Una voz ya guardada puede no aparecer en la enumeracion de este equipo
+  // (por ejemplo, un perfil SAPI compartido entre dos Windows distintos).
+  // Solo exigimos que figure en el catalogo cuando el usuario la cambia.
+  if (msg.settings.voiceId !== undefined && !voiceOption) {
+    throw new Error(`voz desconocida: "${nextVoiceId}"`);
   }
 
-  // Activar confidencial con un avatar de nube puesto: en vez de fallar entero
-  // (y quedarnos sin modo confidencial), se cae al primer avatar local.
-  if (nextConfidential && nextAvatar && !nextAvatar.local) {
-    const fallback = avatars.find((a) => a.local);
-    if (!fallback) {
-      log(`✗ [config] modo confidencial sin ningun avatar local disponible`);
-      return;
-    }
-    log(`⚙️  confidencial: "${nextAvatar.name}" usa la nube — se cambia a "${fallback.name}"`);
-    nextAvatar = fallback;
+  const nextConfidential = msg.settings.confidential ?? current.confidential;
+  if (nextConfidential && !modelOption.local) {
+    throw new Error(`el modelo "${modelOption.label}" usa la nube`);
+  }
+  const voiceIsLocal = voiceOption?.local ?? current.voice.engine === 'sapi';
+  if (nextConfidential && !voiceIsLocal) {
+    throw new Error(`la voz "${voiceOption?.name ?? current.voice.name}" usa la nube`);
   }
 
-  // Un avatar nuevo trae su modelo; si no, manda el que pidan explicitamente.
-  const nextModel =
-    nextAvatar !== avatar ? nextAvatar?.model ?? model : s.model && s.model !== model ? s.model : model;
+  const patch: AvatarProfilePatch = {
+    ...(msg.settings.model !== undefined ? { model: nextModel } : {}),
+    ...(msg.settings.confidential !== undefined ? { confidential: nextConfidential } : {}),
+    ...(msg.settings.voiceId !== undefined
+      ? {
+          voice: {
+            engine: voiceOption!.engine,
+            name: nextVoiceId.slice(nextVoiceId.indexOf(':') + 1),
+            rate: current.voice.rate,
+          },
+        }
+      : {}),
+  };
 
-  if (nextAvatar === avatar && nextModel === model && nextConfidential === confidential) return;
+  const candidate: AvatarProfile = {
+    ...current,
+    model: nextModel,
+    confidential: nextConfidential,
+    voice: patch.voice ?? current.voice,
+  };
 
-  try {
-    // Se construye y VALIDA el candidato antes de tocar nada: describe() llama a
-    // resolveModel, que lanza si el modelo no cuadra (p. ej. nube en
-    // confidencial, proveedor desconocido o clave ausente).
-    const nextBrain = makeBrain(nextModel, nextConfidential, nextAvatar);
-    const info = nextBrain.describe();
-    const nextSpeaker = makeSpeaker(nextConfidential, nextAvatar);
-    const voiceInfo = nextSpeaker.describe();
-
-    // Solo ahora, con todo construido y validado, se compromete el estado.
-    brain = nextBrain;
-    speaker = nextSpeaker;
-    model = nextModel;
-    confidential = nextConfidential;
-    avatar = nextAvatar;
-    session.reconfigure({ brain, speaker });
-    sendAvatars(); // que la UI sepa cual quedo activo
-    log(
-      `⚙️  ${avatar ? `${avatar.name} · ` : ''}${info.provider}/${info.model} · voz ${voiceInfo.voice}${confidential ? ' · confidencial' : ''}`,
-    );
-  } catch (err) {
-    // Falla la validacion: se mantiene la config anterior intacta.
-    log(`✗ [config] ${(err as Error).message} — se mantiene la configuracion anterior`);
+  // El perfil activo se valida por completo antes de tocar el disco.
+  if (avatar?.id === current.id) {
+    makeBrain(
+      process.env['ALPHA_MODEL'] ?? candidate.model,
+      confidentialForced || nextConfidential,
+      candidate,
+    ).describe();
+    makeSpeaker(confidentialForced || nextConfidential, candidate).describe();
   }
-});
+
+  avatars = saveAvatarProfile(current.id, patch);
+  const saved = avatarById(current.id)!;
+  if (avatar?.id === current.id) activateAvatar(saved);
+  else sendAvatars();
+}
 
 // Heartbeat: si lleva mas de 3s sin cambiar de estado (y no esta escuchando),
 // avisa de cuanto lleva, para ver un cuelgue en vez de un silencio.

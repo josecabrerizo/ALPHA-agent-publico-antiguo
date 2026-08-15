@@ -1,6 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { parse as parseYaml } from 'yaml';
+import { isMap, isSeq, parse as parseYaml, parseDocument } from 'yaml';
 import { repoRoot } from '../paths.js';
 import { DEFAULT_CONFIG } from './schema.js';
 
@@ -8,8 +8,8 @@ import { DEFAULT_CONFIG } from './schema.js';
  * Perfiles de avatar. Un avatar no es solo una imagen: es un perfil que
  * reconfigura al asistente (nombre, personalidad, modelo, voz e imagen).
  *
- * La privacidad es del avatar: `local: true` significa que solo usa recursos de
- * la maquina. En modo confidencial solo se ofrecen esos.
+ * La privacidad es del avatar: `confidential: true` significa que solo usa
+ * recursos de la maquina.
  */
 
 export interface AvatarVoice {
@@ -25,20 +25,26 @@ export interface AvatarProfile {
   role: string;
   /** Como se comporta: se inyecta en el prompt del sistema. */
   personality: string;
-  /** Privacidad: true = solo recursos locales (modelo y voz de la maquina). */
-  local: boolean;
+  /** Modo confidencial propio del avatar: solo modelo y voz locales. */
+  confidential: boolean;
   model: string;
   /** Ruta absoluta ya resuelta, para que la UI pueda cargarla directamente. */
   image: string;
   voice: AvatarVoice;
 }
 
+export interface AvatarProfilePatch {
+  model?: string;
+  confidential?: boolean;
+  voice?: AvatarVoice;
+}
+
 const avatarsPath = path.join(repoRoot, 'config', 'avatars.yaml');
 
 /**
  * Carga los perfiles. Descarta los mal formados en vez de tumbar el arranque, y
- * corrige la incoherencia mas peligrosa: un avatar declarado local no puede
- * hablar con una voz de nube.
+ * corrige la incoherencia mas peligrosa: un avatar confidencial no puede hablar
+ * con una voz de nube.
  */
 export function loadAvatars(): AvatarProfile[] {
   let raw: string;
@@ -79,15 +85,22 @@ function normalize(entry: unknown): AvatarProfile | undefined {
   const name = str(e['name']);
   if (!id || !name) return undefined;
 
-  const local = e['local'] === true;
+  // `local` fue el nombre original. Se sigue leyendo para que una configuracion
+  // anterior arranque, pero al guardar se migra a `confidential`, que describe
+  // lo que el usuario configura realmente.
+  const confidential = e['confidential'] === true || e['local'] === true;
   const voiceRaw = (e['voice'] ?? {}) as Record<string, unknown>;
-  let engine = voiceRaw['engine'] === 'sapi' ? 'sapi' : 'edge';
-  // Contrato de privacidad: un avatar local no puede usar una voz de nube.
-  if (local && engine !== 'sapi') engine = 'sapi';
+  const requestedEngine = voiceRaw['engine'] === 'sapi' ? 'sapi' : 'edge';
+  let engine = requestedEngine;
+  // Contrato de privacidad: un avatar confidencial no puede usar voz de nube.
+  if (confidential && engine !== 'sapi') engine = 'sapi';
+  const forcedLocalVoice = requestedEngine !== engine;
 
   const voice: AvatarVoice = {
     engine: engine as 'edge' | 'sapi',
-    name: str(voiceRaw['name']) ?? (engine === 'sapi' ? DEFAULT_CONFIG.tts.sapiVoice : DEFAULT_CONFIG.tts.edgeVoice),
+    name:
+      (forcedLocalVoice ? undefined : str(voiceRaw['name'])) ??
+      (engine === 'sapi' ? DEFAULT_CONFIG.tts.sapiVoice : DEFAULT_CONFIG.tts.edgeVoice),
     rate: typeof voiceRaw['rate'] === 'number' ? voiceRaw['rate'] : 0,
   };
 
@@ -97,12 +110,61 @@ function normalize(entry: unknown): AvatarProfile | undefined {
     name,
     role: str(e['role']) ?? '',
     personality: str(e['personality']) ?? '',
-    local,
+    confidential,
     model: str(e['model']) ?? DEFAULT_CONFIG.brain.model,
     // Se resuelve a absoluta: la UI es otro proceso y no comparte cwd.
     image: image ? path.resolve(repoRoot, image) : '',
     voice,
   };
+}
+
+/**
+ * Modifica un unico perfil conservando comentarios, orden y formato general del
+ * YAML. Devuelve el documento nuevo para poder probarlo sin tocar el fichero.
+ */
+export function patchAvatarsYaml(raw: string, id: string, patch: AvatarProfilePatch): string {
+  const doc = parseDocument(raw);
+  if (doc.errors.length > 0) throw new Error('avatars.yaml contiene YAML invalido');
+
+  const list = doc.get('avatars', true);
+  if (!isSeq(list)) throw new Error('avatars.yaml no contiene una lista "avatars"');
+
+  const index = list.items.findIndex((item) => isMap(item) && item.get('id') === id);
+  if (index < 0) throw new Error(`avatar desconocido: "${id}"`);
+
+  if (patch.model !== undefined) doc.setIn(['avatars', index, 'model'], patch.model);
+  if (patch.confidential !== undefined) {
+    doc.setIn(['avatars', index, 'confidential'], patch.confidential);
+    // Migracion del nombre antiguo: una sola clave evita dos fuentes de verdad.
+    doc.deleteIn(['avatars', index, 'local']);
+  }
+  if (patch.voice !== undefined) {
+    doc.setIn(['avatars', index, 'voice'], {
+      engine: patch.voice.engine,
+      name: patch.voice.name,
+      rate: patch.voice.rate,
+    });
+  }
+  return String(doc);
+}
+
+/** Persiste un cambio de perfil de forma atomica y devuelve los perfiles efectivos. */
+export function saveAvatarProfile(id: string, patch: AvatarProfilePatch): AvatarProfile[] {
+  const raw = readFileSync(avatarsPath, 'utf8');
+  const next = patchAvatarsYaml(raw, id, patch);
+  const parsed = parseAvatars(next);
+  const profile = parsed.find((candidate) => candidate.id === id);
+  if (!profile) throw new Error(`el perfil "${id}" quedaria invalido`);
+
+  const tmp = `${avatarsPath}.${process.pid}.tmp`;
+  try {
+    writeFileSync(tmp, next, { encoding: 'utf8', mode: 0o600 });
+    renameSync(tmp, avatarsPath);
+  } catch (error) {
+    rmSync(tmp, { force: true });
+    throw error;
+  }
+  return parsed;
 }
 
 function str(v: unknown): string | undefined {

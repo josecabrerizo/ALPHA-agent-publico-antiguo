@@ -36,7 +36,8 @@ export function resolveModel(ref: string, config: BrainConfig): ResolvedModel {
     );
   }
 
-  const apiKey = provider.apiKey ?? (provider.apiKeyEnv ? process.env[provider.apiKeyEnv] : undefined);
+  const apiKey =
+    provider.apiKey ?? (provider.apiKeyEnv ? process.env[provider.apiKeyEnv] : undefined);
   if (!apiKey) {
     throw new Error(
       `Falta la clave del proveedor "${providerName}". ` +

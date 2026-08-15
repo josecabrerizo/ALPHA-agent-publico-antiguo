@@ -33,12 +33,24 @@ async function collect(source: AsyncIterable<Buffer>): Promise<Utterance[]> {
 }
 
 test('segmenta dos tramos hablados separados por silencio', async () => {
-  const timeline = Buffer.concat([pcm(600, 0), pcm(1000, 0.25), pcm(900, 0), pcm(600, 0.25), pcm(900, 0)]);
+  const timeline = Buffer.concat([
+    pcm(600, 0),
+    pcm(1000, 0.25),
+    pcm(900, 0),
+    pcm(600, 0.25),
+    pcm(900, 0),
+  ]);
   const found = await collect(chunked(timeline));
 
   assert.equal(found.length, 2, `esperaba 2 tramos, salieron ${found.length}`);
-  assert.ok(Math.abs(found[0]!.speechMs - 1000) <= 120, `habla 1: ${found[0]!.speechMs}ms, esperaba ~1000`);
-  assert.ok(Math.abs(found[1]!.speechMs - 600) <= 120, `habla 2: ${found[1]!.speechMs}ms, esperaba ~600`);
+  assert.ok(
+    Math.abs(found[0]!.speechMs - 1000) <= 120,
+    `habla 1: ${found[0]!.speechMs}ms, esperaba ~1000`,
+  );
+  assert.ok(
+    Math.abs(found[1]!.speechMs - 600) <= 120,
+    `habla 2: ${found[1]!.speechMs}ms, esperaba ~600`,
+  );
   // El buffer emitido lleva ademas el pre-roll, para no comerse la primera silaba.
   assert.ok(found[0]!.durationMs > found[0]!.speechMs, 'falta el pre-roll en el buffer');
 });

@@ -46,7 +46,9 @@ const rms = samples > 0 ? Math.sqrt(sumSquares / samples) : 0;
 console.log(`  Arranque: ${latency.toFixed(1)}s hasta el primer byte`);
 console.log(`  Recibido: ${(bytes / 1024).toFixed(0)} KB en ${elapsed.toFixed(1)}s de flujo`);
 console.log(`  Ritmo:    ${(ratio * 100).toFixed(0)}% del esperado para 16 kHz mono`);
-console.log(`  Nivel:    pico ${toDbfs(peak).toFixed(1)} dBFS / medio ${toDbfs(rms).toFixed(1)} dBFS\n`);
+console.log(
+  `  Nivel:    pico ${toDbfs(peak).toFixed(1)} dBFS / medio ${toDbfs(rms).toFixed(1)} dBFS\n`,
+);
 
 // Un desfase grande delata un formato mal negociado con ffmpeg, no ruido.
 if (bytes === 0) {

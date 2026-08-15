@@ -20,5 +20,11 @@ export type { Skill } from './brain/skills/types.js';
 export { DEFAULT_BRAIN_CONFIG } from './brain/config.js';
 export { resolveModel } from './brain/registry.js';
 export type { BrainConfig, ProviderConfig, ResolvedModel } from './brain/types.js';
-export { createSpeaker } from './tts/speaker.js';
-export { DEFAULT_TTS_CONFIG, type Speaker, type TtsConfig, type VoiceEngine } from './tts/types.js';
+export { createSpeaker, createLocalSpeaker, hasLocalVoice } from './tts/speaker.js';
+export {
+  DEFAULT_TTS_CONFIG,
+  type Speaker,
+  type TtsConfig,
+  type VoiceEngine,
+  type VoiceBackend,
+} from './tts/types.js';

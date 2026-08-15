@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadConfig } from './loader.js';
+import { STT_MODELS } from './schema.js';
 
 // Estos campos vienen de config/default.yaml (comprometido) y no los pisan los
 // ajustes en vivo del avatar, asi que la prueba es determinista.
@@ -30,4 +31,22 @@ test('la config tiene una forma valida', () => {
   assert.equal(typeof config.brain.model, 'string');
   assert.ok(config.tts.engine === 'edge' || config.tts.engine === 'sapi');
   assert.ok(Number.isFinite(config.audio.gainDb));
+});
+
+/**
+ * Todo lo que el menu del avatar guarda tiene que tener sitio en la config, o
+ * se escribe en disco y no lo lee nadie: era el caso del mute del microfono y
+ * de la voz elegida, que se perdian en cada reinicio.
+ */
+test('los ajustes globales que guarda la UI tienen su hueco en la config', () => {
+  const config = loadConfig();
+  assert.equal(typeof config.audio.micEnabled, 'boolean', 'falta audio.micEnabled');
+});
+
+test('stt.model es uno de los tamanos que el proyecto sabe descargar', () => {
+  const config = loadConfig();
+  assert.ok(
+    STT_MODELS.includes(config.stt.model),
+    `stt.model "${config.stt.model}" no es ${STT_MODELS.join(' | ')}`,
+  );
 });

@@ -147,7 +147,10 @@ async function findBinaryDir(root) {
 }
 
 async function setupBinary() {
-  const marker = path.join(vendorDir, process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli');
+  const marker = path.join(
+    vendorDir,
+    process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli',
+  );
   if (!force && (await exists(marker))) {
     console.log(`✓ Binario ya presente en ${path.relative(repoRoot, marker)}`);
     return;
@@ -183,7 +186,9 @@ async function setupBinary() {
 async function setupModel() {
   const expected = MODEL_SHA1[modelSize];
   if (!expected) {
-    throw new Error(`Modelo desconocido: ${modelSize}. Opciones: ${Object.keys(MODEL_SHA1).join(', ')}`);
+    throw new Error(
+      `Modelo desconocido: ${modelSize}. Opciones: ${Object.keys(MODEL_SHA1).join(', ')}`,
+    );
   }
 
   const dest = path.join(modelsDir, `ggml-${modelSize}.bin`);
@@ -191,7 +196,9 @@ async function setupModel() {
     // Se verifica aunque no lo hayamos bajado nosotros: el caso normal aqui es
     // un modelo colocado a mano, y una descarga truncada se ve igual que una buena.
     const { size } = await stat(dest);
-    process.stdout.write(`Modelo ya presente (${(size / 1024 / 1024).toFixed(0)} MB). Verificando... `);
+    process.stdout.write(
+      `Modelo ya presente (${(size / 1024 / 1024).toFixed(0)} MB). Verificando... `,
+    );
     const actual = await sha1(dest);
     if (actual !== expected) {
       console.log('MAL');
