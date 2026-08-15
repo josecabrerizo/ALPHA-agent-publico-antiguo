@@ -1,7 +1,7 @@
 name: Codex Trigger
 
 # Comenta "@codex review" automáticamente en cada PR nuevo (o reabierto) contra
-# master, para disparar la revisión de Codex.
+# develop o master, para disparar la revisión de Codex.
 #
 # El comentario se publica con la identidad de un USUARIO (PAT en el secreto
 # CODEX_TRIGGER_TOKEN), NO con github-actions[bot], porque Codex solo atiende a
@@ -12,7 +12,9 @@ name: Codex Trigger
 on:
   pull_request:
     types: [opened, reopened]
-    branches: [master]
+    # `develop` es donde llegan las PR del ciclo normal. Sin esta rama aqui, la
+    # revision de Codex —que es una puerta, no un tramite— no se dispararia.
+    branches: [develop, master]
 
 # El GITHUB_TOKEN por defecto no se usa para escribir (lo hace el PAT); mínimo.
 permissions:

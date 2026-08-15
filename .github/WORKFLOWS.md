@@ -1,5 +1,39 @@
 # GitHub Actions Workflows
 
+## Ramas y ciclo de trabajo
+
+`develop` es la rama de **integración**: es donde llegan todas las PR. `master`
+queda para lo que se publica.
+
+El ciclo es siempre el mismo, sin saltarse pasos:
+
+1. Rama nueva a partir de `develop`.
+2. Empujarla a **tu fork** (`origin`).
+3. Abrir PR de esa rama hacia **`upstream/develop`**.
+4. Esperar la revisión de **Codex**. Se fusiona cuando da el visto bueno — es
+   una puerta, no un trámite.
+5. Fusionado, volver a `develop` en local.
+6. Traerse `upstream/develop`.
+7. Empujar `develop` a `origin` para dejar el fork igualado.
+
+```bash
+git switch -c mi-rama develop
+# ...trabajo...
+git push -u origin mi-rama
+gh pr create --repo DigitalTPM/digitaltpm-ALPHA --base develop
+
+# tras fusionar:
+git switch develop
+git pull upstream develop
+git push origin develop
+```
+
+Los tres workflows están atados a esas ramas. Si algún día cambia el nombre de
+la rama de integración, hay que tocarlos: `ci.yml` y `codex-trigger.yml` en su
+`branches:`, y `claude.yml` en el `ref` que resuelve y en los prompts que dicen
+contra qué base abrir el PR. Si se olvida, no falla nada de forma visible —
+simplemente los workflows dejan de dispararse.
+
 ## `ci.yml` - Compilar y probar
 
 En cada push a `master` y en cada PR contra `master`, sobre **Windows y Linux**:
