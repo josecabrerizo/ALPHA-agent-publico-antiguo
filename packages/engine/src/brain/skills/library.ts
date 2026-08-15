@@ -1,5 +1,6 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { stringify as stringifyYaml } from 'yaml';
 import { loadSkills } from './loader.js';
 import type { Skill, SkippedSkill } from './types.js';
 import { textArg, type Tool } from '../tools/types.js';
@@ -107,21 +108,56 @@ export class SkillLibrary {
         },
         required: ['nombre', 'descripcion', 'contenido'],
       },
+      destructive: true,
       run: async (args) => {
         const slug = slugify(textArg(args, 'nombre'));
-        const descripcion = textArg(args, 'descripcion');
+        // La descripcion va en el frontmatter y se declara "una linea": se
+        // aplasta a una. Es tambien la primera barrera contra que un salto de
+        // linea abra claves nuevas ahi dentro.
+        const descripcion = textArg(args, 'descripcion').replace(/\s+/g, ' ');
         const contenido = textArg(args, 'contenido');
         if (!slug) return 'Nombre de skill invalido.';
         if (!descripcion || !contenido) return 'Faltan la descripcion o el contenido.';
 
         const dir = path.join(this.skillsDir, slug);
-        const md = `---\nname: ${slug}\ndescription: ${descripcion}\n---\n\n${contenido}\n`;
+        const destino = path.join(dir, 'SKILL.md');
+
+        // Nunca se pisa una skill existente: reescribirla en silencio permitiria
+        // secuestrar un procedimiento en el que el usuario ya confia.
+        try {
+          await access(destino);
+          return `Ya existe una skill "${slug}". Elige otro nombre; para cambiar la que hay, tiene que editarla una persona.`;
+        } catch {
+          // no existe: adelante
+        }
+
+        // El frontmatter se SERIALIZA, no se interpola. Con plantillas, una
+        // descripcion con un salto de linea metia claves arbitrarias (requires,
+        // y cualquier campo que este formato gane en el futuro).
+        const front = stringifyYaml({
+          name: slug,
+          description: descripcion,
+          // En cuarentena hasta que una persona la apruebe. El agente propone;
+          // no se auto-concede instrucciones permanentes.
+          pending: true,
+        }).trimEnd();
+        const md = `---\n${front}\n---\n\n${contenido}\n`;
+
+        const temporal = `${destino}.${process.pid}.tmp`;
         try {
           await mkdir(dir, { recursive: true });
-          await writeFile(path.join(dir, 'SKILL.md'), md, 'utf8');
-          await this.load(); // recargar para que quede disponible ya
-          return `Skill "${slug}" creada y disponible.`;
+          // Escritura atomica: si esto se corta a medias, no queda un SKILL.md
+          // truncado que el cargador interpretaria como pueda.
+          await writeFile(temporal, md, 'utf8');
+          await rename(temporal, destino);
+          await this.load(); // que aparezca ya en la lista de pendientes
+          return (
+            `Skill "${slug}" escrita en ${destino}, PENDIENTE DE APROBACION. ` +
+            `No esta activa y no puedes usarla todavia: una persona tiene que ` +
+            `revisarla y quitarle "pending: true".`
+          );
         } catch (error) {
+          await rm(temporal, { force: true }).catch(() => {});
           return `No se pudo crear la skill: ${(error as Error).message}`;
         }
       },

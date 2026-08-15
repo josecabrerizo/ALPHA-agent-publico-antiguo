@@ -39,13 +39,31 @@ export async function loadSkills(
       continue;
     }
 
+    // Cuarentena ANTES que nada: una skill que nadie ha aprobado no se carga,
+    // no entra en el prompt del sistema y usar_skill no la encuentra. Es lo que
+    // impide que una inyeccion de prompt se convierta en instrucciones
+    // permanentes para todas las sesiones siguientes.
+    if (parsed.pending) {
+      skipped.push({
+        name: parsed.name,
+        reason: 'pendiente de aprobar: revisa su SKILL.md y quita "pending: true"',
+      });
+      continue;
+    }
+
     const unmet = await checkRequires(parsed.requires);
     if (unmet) {
       skipped.push({ name: parsed.name, reason: unmet });
       continue;
     }
 
-    skills.push({ ...parsed, dir });
+    skills.push({
+      name: parsed.name,
+      description: parsed.description,
+      body: parsed.body,
+      ...(parsed.requires ? { requires: parsed.requires } : {}),
+      dir,
+    });
   }
 
   return { skills, skipped };
@@ -56,6 +74,8 @@ interface ParsedSkill {
   description: string;
   body: string;
   requires?: SkillRequires;
+  /** En cuarentena: la creo el agente y nadie la ha aprobado todavia. */
+  pending?: boolean;
 }
 
 /** Separa el frontmatter YAML del cuerpo y valida los campos minimos. */
@@ -80,6 +100,7 @@ function parseSkillFile(raw: string): ParsedSkill | undefined {
     description,
     body: (match[2] ?? '').trim(),
     ...(requires ? { requires } : {}),
+    ...(front['pending'] === true ? { pending: true } : {}),
   };
 }
 
