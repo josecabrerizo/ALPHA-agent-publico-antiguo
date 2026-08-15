@@ -81,6 +81,35 @@ test('el interruptor de microfono llega validado y descarta la basura', async ()
   });
 });
 
+test('la configuracion de perfil llega separada y validada por avatar', async () => {
+  await withBridge(async (bridge, token) => {
+    const recibidos: unknown[] = [];
+    bridge.onAvatarConfigMessage((message) => recibidos.push(message));
+
+    const c = client();
+    await new Promise((r) => c.on('connect', r));
+    c.write(JSON.stringify({ type: 'auth', token }) + '\n');
+    await tick();
+    c.write(
+      JSON.stringify({
+        type: 'avatar-config',
+        avatarId: 'nexus',
+        settings: { model: 'ollama/ornith:9b', confidential: true, micEnabled: false },
+      }) + '\n',
+    );
+    await tick();
+    c.destroy();
+
+    assert.deepEqual(recibidos, [
+      {
+        type: 'avatar-config',
+        avatarId: 'nexus',
+        settings: { model: 'ollama/ornith:9b', confidential: true },
+      },
+    ]);
+  });
+});
+
 test('un segundo puente en el mismo puerto avisa en vez de fingir que escucha', async () => {
   await withBridge(async (bridge, token) => {
     const segundo = new AvatarBridge(TEST_PORT);
@@ -146,13 +175,13 @@ test('solo los clientes autenticados reciben difusiones', async () => {
 test('un token equivocado no autentica', async () => {
   await withBridge(async (bridge) => {
     const recibidos: string[] = [];
-    bridge.onConfigMessage((m) => recibidos.push(m.settings.model ?? ''));
+    bridge.onConfigMessage((m) => recibidos.push(m.settings.agent ?? ''));
 
     const c = client();
     await new Promise((r) => c.on('connect', r));
     c.write(JSON.stringify({ type: 'auth', token: 'token-falso' }) + '\n');
     await tick();
-    c.write(JSON.stringify({ type: 'config', settings: { model: 'anthropic/x' } }) + '\n');
+    c.write(JSON.stringify({ type: 'config', settings: { agent: 'nexus' } }) + '\n');
     await tick();
     c.destroy();
 

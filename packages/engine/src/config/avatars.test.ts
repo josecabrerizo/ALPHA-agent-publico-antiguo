@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { parseAvatars, loadAvatars } from './avatars.js';
+import { parseAvatars, loadAvatars, patchAvatarsYaml } from './avatars.js';
 import { repoRoot } from '../paths.js';
 
 /**
@@ -11,24 +11,25 @@ import { repoRoot } from '../paths.js';
  * YAML. Es la regla que sostiene el modo confidencial.
  */
 
-test('un avatar local con voz de nube declarada se corrige a la voz del sistema', () => {
+test('un avatar confidencial con voz de nube declarada se corrige a la voz del sistema', () => {
   const [avatar] = parseAvatars(`
 avatars:
   - id: nexus
     name: Nexus
-    local: true
+    confidential: true
     voice: { engine: edge, name: es-ES-AlvaroNeural, rate: 0 }
 `);
   assert.ok(avatar);
   assert.equal(avatar.voice.engine, 'sapi', 'un avatar local no puede usar Edge (nube)');
+  assert.equal(avatar.voice.name, 'Microsoft Helena Desktop');
 });
 
-test('un avatar de nube conserva su voz de nube', () => {
+test('un avatar no confidencial conserva su voz de nube', () => {
   const [avatar] = parseAvatars(`
 avatars:
   - id: vulpis
     name: Vulpis.AI
-    local: false
+    confidential: false
     voice: { engine: edge, name: es-ES-AlvaroNeural, rate: 0 }
 `);
   assert.ok(avatar);
@@ -36,14 +37,16 @@ avatars:
   assert.equal(avatar.voice.name, 'es-ES-AlvaroNeural');
 });
 
-test('local se declara explicitamente: sin el, el avatar no se da por local', () => {
+test('confidential se declara explicitamente y local se admite como migracion', () => {
   const [avatar] = parseAvatars(`
 avatars:
   - id: x
     name: X
 `);
   assert.ok(avatar);
-  assert.equal(avatar.local, false, 'privacidad por omision NO es "local"; hay que declararla');
+  assert.equal(avatar.confidential, false);
+  const [legacy] = parseAvatars('avatars: [{ id: legacy, name: Legacy, local: true }]');
+  assert.equal(legacy?.confidential, true);
 });
 
 test('los perfiles sin id o sin nombre se descartan sin tumbar el arranque', () => {
@@ -88,12 +91,35 @@ test('el avatars.yaml del repo trae los cuatro perfiles y respeta el contrato', 
   for (const a of avatars) {
     assert.ok(a.personality, `${a.id} necesita personalidad: es lo que lo hace un perfil`);
     assert.ok(a.image, `${a.id} necesita imagen`);
-    if (a.local)
-      assert.equal(a.voice.engine, 'sapi', `${a.id} es local y debe usar voz del sistema`);
+    if (a.confidential)
+      assert.equal(a.voice.engine, 'sapi', `${a.id} es confidencial y debe usar voz local`);
   }
   assert.ok(
-    avatars.some((a) => a.local),
-    'debe haber al menos un avatar local, o el modo confidencial se queda sin opciones',
+    avatars.some((a) => a.confidential),
+    'debe haber al menos un avatar confidencial',
+  );
+});
+
+test('actualiza solo el perfil pedido y conserva comentarios y los demas avatares', () => {
+  const raw = `# cabecera\navatars:\n  - id: uno\n    name: Uno\n    local: false # legado\n    model: ollama/a\n    voice: { engine: edge, name: voz-a, rate: 1 }\n  - id: dos\n    name: Dos\n    model: ollama/b\n`;
+  const next = patchAvatarsYaml(raw, 'uno', {
+    model: 'ollama/nuevo',
+    confidential: true,
+    voice: { engine: 'sapi', name: 'Helena', rate: -1 },
+  });
+  assert.match(next, /# cabecera/);
+  assert.doesNotMatch(next, /local:/);
+  const avatars = parseAvatars(next);
+  assert.equal(avatars[0]?.model, 'ollama/nuevo');
+  assert.equal(avatars[0]?.confidential, true);
+  assert.deepEqual(avatars[0]?.voice, { engine: 'sapi', name: 'Helena', rate: -1 });
+  assert.equal(avatars[1]?.model, 'ollama/b');
+});
+
+test('rechaza modificar un avatar que no existe', () => {
+  assert.throws(
+    () => patchAvatarsYaml('avatars: [{ id: uno, name: Uno }]', 'otro', { model: 'x/y' }),
+    /desconocido/,
   );
 });
 

@@ -17,11 +17,8 @@ const settingsPath = path.join(configDir, 'alpha.settings.json');
  */
 interface RuntimeSettings {
   agent?: string;
-  model?: string;
-  confidential?: boolean;
   audioDevice?: string;
   micEnabled?: boolean;
-  voiceId?: string;
 }
 
 /**
@@ -77,11 +74,8 @@ function readSettings(): RuntimeSettings {
 /** Los ajustes del avatar (planos) mapean a rincones concretos del esquema. */
 function applyRuntimeSettings(config: AlphaConfig, s: RuntimeSettings): AlphaConfig {
   if (typeof s.agent === 'string') config.agent = s.agent;
-  if (typeof s.model === 'string') config.brain.model = s.model;
-  if (typeof s.confidential === 'boolean') config.confidential = s.confidential;
   if (typeof s.audioDevice === 'string') config.audio.device = s.audioDevice;
   if (typeof s.micEnabled === 'boolean') config.audio.micEnabled = s.micEnabled;
-  if (typeof s.voiceId === 'string') config.tts.voiceId = s.voiceId;
   return config;
 }
 
@@ -104,7 +98,6 @@ function validate(config: AlphaConfig): void {
   if (config.tts.engine !== 'edge' && config.tts.engine !== 'sapi') {
     config.tts.engine = DEFAULT_CONFIG.tts.engine;
   }
-  if (typeof config.tts.voiceId !== 'string') config.tts.voiceId = DEFAULT_CONFIG.tts.voiceId;
   if (!Number.isFinite(config.audio.gainDb)) config.audio.gainDb = 0;
   if (typeof config.audio.micEnabled !== 'boolean') {
     config.audio.micEnabled = DEFAULT_CONFIG.audio.micEnabled;

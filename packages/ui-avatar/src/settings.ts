@@ -10,25 +10,16 @@ import { AGENT_ORDER, DEFAULT_AGENT, type AgentId } from './agents.js';
  */
 export interface Settings {
   agent: AgentId;
-  /** Ref proveedor/modelo, como en el cerebro (brain/config.ts). */
-  model: string;
-  /** Modo confidencial: sin nube. */
-  confidential: boolean;
   /** Microfono elegido. Vacio = el predeterminado del sistema. */
   audioDevice: string;
   /** Escucha activa. false = el motor cierra la captura y suelta el micro. */
   micEnabled: boolean;
-  /** Voz actual del avatar: "sapi:..." o "edge:..." según getAvailableVoices. */
-  voiceId: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   agent: DEFAULT_AGENT,
-  model: 'ollama/gemma4:12b',
-  confidential: false,
   audioDevice: '',
   micEnabled: true,
-  voiceId: '', // vacío = usar la predeterminada del avatar
 };
 
 // dist/settings.js -> repoRoot: packages/ui-avatar/dist -> tres niveles arriba.
@@ -52,17 +43,13 @@ export function mergeSettings(raw: unknown): Settings {
   const v = raw as Record<string, unknown>;
   const str = (key: keyof Settings, fallback: string): string =>
     typeof v[key] === 'string' ? v[key] : fallback;
-  const bool = (key: keyof Settings, fallback: boolean): boolean =>
-    typeof v[key] === 'boolean' ? v[key] : fallback;
   return {
     agent: AGENT_ORDER.includes(v['agent'] as AgentId)
       ? (v['agent'] as AgentId)
       : DEFAULT_SETTINGS.agent,
-    model: str('model', DEFAULT_SETTINGS.model),
-    confidential: bool('confidential', DEFAULT_SETTINGS.confidential),
     audioDevice: str('audioDevice', DEFAULT_SETTINGS.audioDevice),
-    micEnabled: bool('micEnabled', DEFAULT_SETTINGS.micEnabled),
-    voiceId: str('voiceId', DEFAULT_SETTINGS.voiceId),
+    micEnabled:
+      typeof v['micEnabled'] === 'boolean' ? v['micEnabled'] : DEFAULT_SETTINGS.micEnabled,
   };
 }
 
@@ -83,15 +70,3 @@ export function saveSettings(settings: Settings): void {
     console.error('No se pudo guardar la configuracion:', (error as Error).message);
   }
 }
-
-/** Modelos ofrecidos en el menu. Reflejan los proveedores del cerebro. */
-export const MODEL_OPTIONS: { ref: string; label: string; local: boolean }[] = [
-  { ref: 'ollama/gemma4:12b', label: 'Gemma 4 12B (local)', local: true },
-  { ref: 'ollama/ornith:9b', label: 'Ornith 9B (local)', local: true },
-  // Corre en la nube de Ollama pese a acceder por el endpoint local: no es
-  // local a efectos de privacidad, el modo confidencial lo bloquea.
-  { ref: 'ollama/gemma4:31b-cloud', label: 'Gemma 4 31B (Ollama cloud)', local: false },
-  { ref: 'anthropic/claude-sonnet-5', label: 'Claude Sonnet 5 (nube)', local: false },
-  { ref: 'openai/gpt-5.1', label: 'GPT-5.1 (nube)', local: false },
-  { ref: 'gemini/gemini-2.5-flash', label: 'Gemini 2.5 Flash (nube)', local: false },
-];

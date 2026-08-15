@@ -30,7 +30,7 @@ A.L.P.H.A. piensa (con herramientas y skills) y responde con voz. Falta la visi�
 | Bucle completo escuchar→pensar→hablar             | ✅                 | ✅                                |
 | Chat escrito                                      | ✅                 | ✅                                |
 | Herramientas (tool-calling)                       | ✅                 | ✅                                |
-| Skills (estándar SKILL.md, el agente las crea)    | ✅                 | ✅                                |
+| Skills (estándar SKILL.md, el agente las propone) | ✅                 | ✅                                |
 | Visión de pantalla                                | ⬜                 | ⬜                                |
 
 El menú de voces del avatar solo enumera voces locales en Windows (SAPI). En
@@ -155,6 +155,44 @@ set ALPHA_AUDIO_DEVICE=Headset Microphone (Realtek(R) Audio)
 npm run spike:stt
 ```
 
+## Skills: el agente propone, tú apruebas
+
+Una skill es un `SKILL.md` (frontmatter + markdown) que le enseña al agente cómo
+encadenar sus herramientas para un flujo concreto. El agente puede escribir las
+suyas con `crear_skill` — pero **nacen en cuarentena**:
+
+```yaml
+---
+name: resumir-correo
+description: Resume un correo largo
+pending: true # ← mientras esté, la skill no existe para el agente
+---
+```
+
+Una skill pendiente no se carga, no entra en el prompt del sistema y
+`usar_skill` no la encuentra. Para aprobarla, léela y quita esa línea.
+
+No es ceremonia. La descripción de cada skill se inyecta en el prompt del
+sistema de **todas las sesiones siguientes**, y su cuerpo se lo traga el agente
+entero al cargarla. Sin cuarentena, cualquier inyección de prompt —una página
+web que el asistente lea, un texto que le peguen— podía convertirse en
+instrucciones permanentes, y nadie se enteraría. Que el agente proponga es útil;
+que se auto-conceda memoria permanente, no.
+
+Las que estén pendientes se listan al arrancar el motor, junto a las omitidas
+por dependencias:
+
+```
+Skills: documentar-reunion
+   · omitida "resumir-correo": pendiente de aprobar: revisa su SKILL.md y quita "pending: true"
+```
+
+Además, `crear_skill` **nunca pisa una skill existente** (secuestrar un
+procedimiento en el que ya confías sería peor que crear uno nuevo), escribe de
+forma atómica, y serializa el frontmatter en vez de interpolarlo — con
+plantillas, una descripción con dos puntos rompía el YAML y un salto de línea
+metía claves que el cargador sí lee, como `requires`.
+
 ## Calidad
 
 ```bash
@@ -251,11 +289,11 @@ y el VAD y whisper no distinguen el origen.
 
 ## Configuración
 
-Un solo esquema, tres capas que se funden en este orden (gana la última):
+La configuración general se funde en este orden (gana la última):
 
 ```
 valores por defecto  →  config/default.yaml  →  config/local.yaml  →  config/alpha.settings.json
-        (código)            (versionado)          (tuyo, ignorado)      (lo que toca el avatar)
+        (código)            (versionado)          (tuyo, ignorado)      (avatar activo, micro y audio)
 ```
 
 `config/local.yaml` es el sitio para lo tuyo: no va al repo.
@@ -272,7 +310,7 @@ avatars:
     name: Nexus
     role: El Guardián de Datos
     personality: Directo y preciso. Vas al grano...
-    local: true # solo recursos de la máquina
+    confidential: true # solo recursos de la máquina
     model: ollama/ornith:9b
     image: assets/avatars/nexus.png # cualquier ruta del disco
     voice: { engine: sapi, name: Microsoft Helena Desktop, rate: -1 }
@@ -285,11 +323,11 @@ avatars:
 | **Nexus**     | Ser de energía cristalina | El Guardián de Datos     | **solo local** |
 | **Synapse**   | Espíritu etéreo           | La Guía Neural           | nube           |
 
-**La privacidad es del avatar, y se cumple sola.** Un perfil `local: true` no
+**La privacidad es del avatar, y se cumple sola.** Un perfil `confidential: true` no
 puede hablar con una voz de nube: si el YAML lo pide, el cargador lo corrige a la
-voz del sistema (SAPI). Y con el **modo confidencial** activo el menú solo ofrece
-avatares locales; si el que está puesto usa la nube, se cambia al primero que no
-lo haga en vez de dejar el asistente en un estado imposible.
+voz del sistema (SAPI). Modelo, voz y modo confidencial aparecen dentro del
+submenú de cada avatar. Cada cambio se valida, se guarda directamente en
+`config/avatars.yaml` y se aplica al instante si ese avatar está activo.
 
 Con una sola voz española instalada en Windows (Helena), lo que distingue a los
 avatares locales es el **ritmo** (`rate`), no el timbre. Para variedad real hacen

@@ -45,13 +45,21 @@ const bridge = connectBridge((msg) => {
     log(`motor conectado · ${msg.inputs.length} micrófonos disponibles`);
   } else if (msg.type === 'avatars') {
     avatar.setAvatarOptions(msg.list, msg.current);
-    const nombres = msg.list.map((a) => `${a.name}${a.local ? '' : ' (nube)'}`).join(', ');
+    const nombres = msg.list
+      .map((a) => `${a.name}${a.confidential ? ' (confidencial)' : ''}`)
+      .join(', ');
     log(`avatares: ${nombres || '(ninguno)'} · activo: ${msg.current ?? '(ninguno)'}`);
   } else if (msg.type === 'voices') {
     avatar.setVoiceOptions(msg.list);
     const sapi = msg.list.filter((v) => v.engine === 'sapi').length;
     const edge = msg.list.filter((v) => v.engine === 'edge').length;
     log(`voces: ${sapi} locales (SAPI) + ${edge} nube (Edge)`);
+  } else if (msg.type === 'models') {
+    avatar.setModelOptions(msg.list);
+    log(`modelos: ${msg.list.length} disponibles`);
+  } else if (msg.type === 'config-error') {
+    log(`configuracion rechazada: ${msg.message}`);
+    avatar.showCaption(`No se aplico: ${msg.message}`);
   }
 });
 (globalThis as Record<string, unknown>)['__alphaBridge'] = bridge;
@@ -60,9 +68,12 @@ const bridge = connectBridge((msg) => {
 // de control. (Si el motor no esta conectado, lo leera del fichero al arrancar.)
 avatar.setOnSettingsChanged((settings) => {
   bridge.send({ type: 'config', settings });
-  log(
-    `config → motor: agente=${settings.agent}, modelo=${settings.model}, confidencial=${settings.confidential}, micro=${settings.audioDevice || '(sistema)'}`,
-  );
+  log(`config → motor: agente=${settings.agent}, micro=${settings.audioDevice || '(sistema)'}`);
+});
+
+avatar.setOnAvatarSettingsChanged((message) => {
+  bridge.send(message);
+  log(`perfil → motor: avatar=${message.avatarId}, cambios=${JSON.stringify(message.settings)}`);
 });
 
 // Chat escrito: Enter en el campo del avatar manda el texto al motor.

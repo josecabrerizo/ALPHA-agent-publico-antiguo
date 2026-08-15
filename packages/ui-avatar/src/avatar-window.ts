@@ -23,11 +23,16 @@ import {
 } from '@nodegui/nodegui';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import type { AvatarOption, VoiceOption } from './bridge-client.js';
+import type {
+  AvatarConfigMessage,
+  AvatarOption,
+  ModelOption,
+  VoiceOption,
+} from './bridge-client.js';
 import { log } from './log.js';
 import { STATE_CYCLE, STATE_RHYTHMS, MAX_PULSE, type AvatarState } from './states.js';
 import { AGENTS, AGENT_ORDER, type AgentId } from './agents.js';
-import { loadSettings, saveSettings, MODEL_OPTIONS, type Settings } from './settings.js';
+import { loadSettings, saveSettings, type Settings } from './settings.js';
 import { POSES, poseForState, posesDirFor, poseFile, breathAt, type Pose } from './poses.js';
 import { PoseAnimator } from './animator.js';
 
@@ -139,12 +144,16 @@ export class AvatarWindow {
 
   /** Se llama al cambiar la config en el menu, para propagarla al motor. */
   private onSettingsChanged: ((settings: Settings) => void) | undefined;
+  /** Cambios de modelo, voz y privacidad, que pertenecen a un perfil. */
+  private onAvatarSettingsChanged: ((message: AvatarConfigMessage) => void) | undefined;
 
   /** Microfonos que manda el motor; el menu "Sonido" se llena con ellos. */
   private micDevices: { name: string; isDefault: boolean }[] = [];
 
   /** Voces disponibles (SAPI locales + Edge nube). */
   private voices: VoiceOption[] = [];
+  /** Modelos disponibles, enviados por el registro autoritativo del motor. */
+  private models: ModelOption[] = [];
 
   constructor() {
     this.setupWindow();
@@ -188,6 +197,10 @@ export class AvatarWindow {
     this.onSettingsChanged = cb;
   }
 
+  setOnAvatarSettingsChanged(cb: (message: AvatarConfigMessage) => void): void {
+    this.onAvatarSettingsChanged = cb;
+  }
+
   /** Registra quien recibe los mensajes escritos (chat de texto). */
   setOnTextSubmit(cb: (text: string) => void): void {
     this.onTextSubmit = cb;
@@ -221,6 +234,10 @@ export class AvatarWindow {
   /** Recibe del motor la lista de voces disponibles (SAPI + Edge). */
   setVoiceOptions(list: VoiceOption[]): void {
     this.voices = list;
+  }
+
+  setModelOptions(list: ModelOption[]): void {
+    this.models = list;
   }
 
   /** Muestra texto en el bocadillo (la ventana se expande) y se esfuma sola. */
@@ -617,32 +634,57 @@ export class AvatarWindow {
     menu.addAction(title);
     menu.addSeparator();
 
-    // Avatar. Los perfiles los manda el motor (personalidad, voz, modelo e
-    // imagen viven ahi); si aun no ha conectado, se cae a la lista local.
+    // Cada avatar es un perfil completo. Modelo, voz y privacidad se editan
+    // dentro de su submenu y el motor los persiste en avatars.yaml.
     const avatarMenu = addSubmenu(menu, 'Avatar');
     this.menuRefs.push(avatarMenu);
-    for (const opt of this.avatarChoices()) {
-      // En modo confidencial solo se ofrecen los avatares que trabajan en local.
-      const blocked = this.settings.confidential && !opt.local;
-      const label = `${opt.name} — ${opt.role}${opt.local ? '' : '  (nube)'}`;
-      avatarMenu.addAction(
-        this.action(label, () => this.update({ agent: opt.id as AgentId }), {
-          checked: this.settings.agent === opt.id,
-          enabled: !blocked,
+    for (const profile of this.avatarChoices()) {
+      const profileMenu = addSubmenu(
+        avatarMenu,
+        `${profile.name} — ${profile.role}${profile.confidential ? '  (confidencial)' : ''}`,
+      );
+      this.menuRefs.push(profileMenu);
+      profileMenu.addAction(
+        this.action('Usar este avatar', () => this.update({ agent: profile.id as AgentId }), {
+          checked: this.settings.agent === profile.id,
         }),
       );
-    }
 
-    // Modelo
-    const modelMenu = addSubmenu(menu, 'Modelo');
-    this.menuRefs.push(modelMenu);
-    for (const opt of MODEL_OPTIONS) {
-      // En modo confidencial, los modelos de nube quedan deshabilitados.
-      const blocked = this.settings.confidential && !opt.local;
-      modelMenu.addAction(
-        this.action(opt.label, () => this.update({ model: opt.ref }), {
-          checked: this.settings.model === opt.ref,
-          enabled: !blocked,
+      const modelMenu = addSubmenu(profileMenu, 'Modelo');
+      this.menuRefs.push(modelMenu);
+      if (this.models.length === 0) {
+        modelMenu.addAction(this.action('(motor no conectado)', () => {}, { enabled: false }));
+      } else {
+        for (const option of this.models) {
+          modelMenu.addAction(
+            this.action(option.label, () => this.changeAvatar(profile.id, { model: option.ref }), {
+              checked: profile.model === option.ref,
+              enabled: !profile.confidential || option.local,
+            }),
+          );
+        }
+      }
+
+      const voiceMenu = addSubmenu(profileMenu, 'Voz');
+      this.menuRefs.push(voiceMenu);
+      if (this.voices.length === 0) {
+        voiceMenu.addAction(this.action('(enumerando voces...)', () => {}, { enabled: false }));
+      } else {
+        const currentVoiceId = `${profile.voice.engine}:${profile.voice.name}`;
+        for (const option of this.voices) {
+          voiceMenu.addAction(
+            this.action(option.name, () => this.changeAvatar(profile.id, { voiceId: option.id }), {
+              checked: currentVoiceId === option.id,
+              enabled: !profile.confidential || option.local,
+            }),
+          );
+        }
+      }
+
+      profileMenu.addSeparator();
+      profileMenu.addAction(
+        this.action('Modo confidencial (sin nube)', () => this.toggleAvatarConfidential(profile), {
+          checked: profile.confidential,
         }),
       );
     }
@@ -665,34 +707,6 @@ export class AvatarWindow {
       }
     }
 
-    // Voz del avatar actual: permite cambiarla entre las disponibles
-    const voiceMenu = addSubmenu(menu, 'Voz del avatar');
-    this.menuRefs.push(voiceMenu);
-    if (this.voices.length === 0) {
-      voiceMenu.addAction(this.action('(enumerando voces...)', () => {}, { enabled: false }));
-    } else {
-      // Buscar la voz del avatar actual o la guardada en settings
-      const currentVoiceId = this.settings.voiceId;
-      for (const v of this.voices) {
-        // En confidencial, solo se ofrecen voces locales
-        const blocked = this.settings.confidential && !v.local;
-        voiceMenu.addAction(
-          this.action(v.name, () => this.update({ voiceId: v.id }), {
-            checked: v.id === currentVoiceId,
-            enabled: !blocked,
-          }),
-        );
-      }
-    }
-
-    // Privacidad
-    menu.addSeparator();
-    menu.addAction(
-      this.action('Modo confidencial (sin nube)', () => this.toggleConfidential(), {
-        checked: this.settings.confidential,
-      }),
-    );
-
     // Salir
     menu.addSeparator();
     menu.addAction(this.action('Salir', () => this.win.close()));
@@ -713,28 +727,34 @@ export class AvatarWindow {
       id,
       name: AGENTS[id].label,
       role: AGENTS[id].tagline,
-      local: true,
+      model: '',
+      confidential: true,
+      voice: { engine: 'sapi', name: '', rate: 0 },
       image: '',
     }));
   }
 
-  private toggleConfidential(): void {
-    const confidential = !this.settings.confidential;
-    // Al activar confidencial con un modelo de nube seleccionado, se cae al
-    // modelo local por defecto para no quedar en un estado imposible.
-    const current = MODEL_OPTIONS.find((m) => m.ref === this.settings.model);
-    const model =
-      confidential && current && !current.local
-        ? (MODEL_OPTIONS.find((m) => m.local)?.ref ?? this.settings.model)
-        : this.settings.model;
-    // Lo mismo con el avatar: uno de nube no puede seguir puesto en modo
-    // confidencial, asi que se propone el primero que trabaje solo en local.
-    const avatar = this.avatars.find((a) => a.id === this.settings.agent);
-    const agent =
-      confidential && avatar && !avatar.local
-        ? ((this.avatars.find((a) => a.local)?.id as AgentId | undefined) ?? this.settings.agent)
-        : this.settings.agent;
-    this.update({ confidential, model, agent });
+  private changeAvatar(avatarId: string, settings: AvatarConfigMessage['settings']): void {
+    this.onAvatarSettingsChanged?.({ type: 'avatar-config', avatarId, settings });
+  }
+
+  private toggleAvatarConfidential(profile: AvatarOption): void {
+    const confidential = !profile.confidential;
+    const model = this.models.find((option) => option.ref === profile.model);
+    const voiceId = `${profile.voice.engine}:${profile.voice.name}`;
+    const voice = this.voices.find((option) => option.id === voiceId);
+    const settings: AvatarConfigMessage['settings'] = { confidential };
+    // Al activar el modo se elige una combinacion local valida en el mismo
+    // comando; nunca se persiste un perfil confidencial que use la nube.
+    if (confidential && (!model || !model.local)) {
+      const fallback = this.models.find((option) => option.local);
+      if (fallback) settings.model = fallback.ref;
+    }
+    if (confidential && (!voice || !voice.local)) {
+      const fallback = this.voices.find((option) => option.local);
+      if (fallback) settings.voiceId = fallback.id;
+    }
+    this.changeAvatar(profile.id, settings);
   }
 
   /**

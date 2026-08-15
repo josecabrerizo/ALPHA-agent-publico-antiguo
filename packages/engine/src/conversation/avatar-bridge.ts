@@ -45,10 +45,19 @@ export interface AvatarOption {
   id: string;
   name: string;
   role: string;
-  /** Privacidad: solo recursos locales. En confidencial solo se ofrecen estos. */
-  local: boolean;
+  /** Modelo, voz y privacidad pertenecen al perfil, no a la UI global. */
+  model: string;
+  confidential: boolean;
+  voice: { engine: 'sapi' | 'edge'; name: string; rate: number };
   /** Ruta absoluta de la imagen (mismo equipo, otro proceso). */
   image: string;
+}
+
+/** Modelo que el motor puede resolver y ofrecer en el menu. */
+export interface ModelOption {
+  ref: string;
+  label: string;
+  local: boolean;
 }
 
 /** Voz disponible para elegir en el avatar. */
@@ -72,19 +81,29 @@ export type AvatarMessage =
   | { type: 'assistant'; text: string }
   | { type: 'devices'; inputs: { name: string; isDefault: boolean }[]; current?: string }
   | { type: 'avatars'; list: AvatarOption[]; current?: string }
-  | { type: 'voices'; list: VoiceOption[] };
+  | { type: 'voices'; list: VoiceOption[] }
+  | { type: 'models'; list: ModelOption[] }
+  | { type: 'config-error'; message: string };
 
 /** Avatar -> motor: cambios de configuracion desde el menu. */
 export interface AlphaConfigMessage {
   type: 'config';
   settings: {
     agent?: string;
-    model?: string;
-    confidential?: boolean;
     audioDevice?: string;
     /** false = microfono silenciado (se cierra la captura). */
     micEnabled?: boolean;
-    /** Voz del avatar: "sapi:..." o "edge:...". */
+  };
+}
+
+/** Cambia y persiste opciones que pertenecen a un perfil de avatars.yaml. */
+export interface AvatarConfigMessage {
+  type: 'avatar-config';
+  avatarId: string;
+  settings: {
+    model?: string;
+    confidential?: boolean;
+    /** Voz del perfil: "sapi:..." o "edge:...". */
     voiceId?: string;
   };
 }
@@ -100,6 +119,7 @@ export class AvatarBridge {
   /** Solo los clientes autenticados; reciben datos y pueden mandar comandos. */
   private readonly authed = new Set<net.Socket>();
   private readonly onConfig: ((msg: AlphaConfigMessage) => void)[] = [];
+  private readonly onAvatarConfig: ((msg: AvatarConfigMessage) => void)[] = [];
   private readonly onText: ((text: string) => void)[] = [];
   private readonly onConnect: (() => void)[] = [];
   private token = '';
@@ -112,6 +132,9 @@ export class AvatarBridge {
   }
   onTextInput(handler: (text: string) => void): void {
     this.onText.push(handler);
+  }
+  onAvatarConfigMessage(handler: (msg: AvatarConfigMessage) => void): void {
+    this.onAvatarConfig.push(handler);
   }
   /** Se dispara cuando un avatar se autentica (para mandarle el estado inicial). */
   onClientConnect(handler: () => void): void {
@@ -213,6 +236,20 @@ export class AvatarBridge {
     if (m['type'] === 'config') {
       const settings = sanitizeSettings(m['settings']);
       if (settings) for (const h of this.onConfig) h({ type: 'config', settings });
+    } else if (
+      m['type'] === 'avatar-config' &&
+      typeof m['avatarId'] === 'string' &&
+      m['avatarId'].length <= MAX_FIELD
+    ) {
+      const settings = sanitizeAvatarSettings(m['settings']);
+      if (settings) {
+        const message: AvatarConfigMessage = {
+          type: 'avatar-config',
+          avatarId: m['avatarId'],
+          settings,
+        };
+        for (const h of this.onAvatarConfig) h(message);
+      }
     } else if (m['type'] === 'text-input' && typeof m['text'] === 'string') {
       const text = m['text'].slice(0, MAX_TEXT);
       if (text.trim()) for (const h of this.onText) h(text);
@@ -262,10 +299,17 @@ function sanitizeSettings(value: unknown): AlphaConfigMessage['settings'] | unde
   const v = value as Record<string, unknown>;
   const out: AlphaConfigMessage['settings'] = {};
   if (typeof v['agent'] === 'string') out.agent = v['agent'].slice(0, MAX_FIELD);
-  if (typeof v['model'] === 'string') out.model = v['model'].slice(0, MAX_FIELD);
   if (typeof v['audioDevice'] === 'string') out.audioDevice = v['audioDevice'].slice(0, MAX_FIELD);
+  if (typeof v['micEnabled'] === 'boolean') out.micEnabled = v['micEnabled'];
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function sanitizeAvatarSettings(value: unknown): AvatarConfigMessage['settings'] | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const v = value as Record<string, unknown>;
+  const out: AvatarConfigMessage['settings'] = {};
+  if (typeof v['model'] === 'string') out.model = v['model'].slice(0, MAX_FIELD);
   if (typeof v['voiceId'] === 'string') out.voiceId = v['voiceId'].slice(0, MAX_FIELD);
   if (typeof v['confidential'] === 'boolean') out.confidential = v['confidential'];
-  if (typeof v['micEnabled'] === 'boolean') out.micEnabled = v['micEnabled'];
   return Object.keys(out).length > 0 ? out : undefined;
 }

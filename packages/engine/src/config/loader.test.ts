@@ -38,10 +38,9 @@ test('la config tiene una forma valida', () => {
  * se escribe en disco y no lo lee nadie: era el caso del mute del microfono y
  * de la voz elegida, que se perdian en cada reinicio.
  */
-test('los ajustes que guarda el avatar tienen su hueco en la config', () => {
+test('los ajustes globales que guarda la UI tienen su hueco en la config', () => {
   const config = loadConfig();
   assert.equal(typeof config.audio.micEnabled, 'boolean', 'falta audio.micEnabled');
-  assert.equal(typeof config.tts.voiceId, 'string', 'falta tts.voiceId');
 });
 
 test('stt.model es uno de los tamanos que el proyecto sabe descargar', () => {

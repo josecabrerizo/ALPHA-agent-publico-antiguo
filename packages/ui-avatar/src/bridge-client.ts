@@ -66,10 +66,17 @@ export interface AvatarOption {
   id: string;
   name: string;
   role: string;
-  /** Privacidad: solo recursos locales. En confidencial solo se ofrecen estos. */
-  local: boolean;
+  model: string;
+  confidential: boolean;
+  voice: { engine: 'sapi' | 'edge'; name: string; rate: number };
   /** Ruta absoluta de la imagen. */
   image: string;
+}
+
+export interface ModelOption {
+  ref: string;
+  label: string;
+  local: boolean;
 }
 
 /** Voz disponible para elegir en el avatar. */
@@ -92,18 +99,26 @@ export type BridgeMessage =
   | { type: 'assistant'; text: string }
   | { type: 'devices'; inputs: { name: string; isDefault: boolean }[]; current?: string }
   | { type: 'avatars'; list: AvatarOption[]; current?: string }
-  | { type: 'voices'; list: VoiceOption[] };
+  | { type: 'voices'; list: VoiceOption[] }
+  | { type: 'models'; list: ModelOption[] }
+  | { type: 'config-error'; message: string };
 
 /** Avatar -> motor: la config elegida en el menu. */
 export interface ConfigMessage {
   type: 'config';
   settings: {
     agent?: string;
-    model?: string;
-    confidential?: boolean;
     audioDevice?: string;
     micEnabled?: boolean;
-    /** Voz del avatar: "sapi:..." o "edge:...". */
+  };
+}
+
+export interface AvatarConfigMessage {
+  type: 'avatar-config';
+  avatarId: string;
+  settings: {
+    model?: string;
+    confidential?: boolean;
     voiceId?: string;
   };
 }
@@ -117,7 +132,7 @@ export interface TextInputMessage {
 export interface BridgeHandle {
   /** Envia la config al motor. Si no esta autenticado, se ignora (el motor la
    *  leera del fichero al arrancar). */
-  send(msg: ConfigMessage): void;
+  send(msg: ConfigMessage | AvatarConfigMessage): void;
   /** Envia un mensaje escrito. Devuelve false si el motor no lo va a recibir. */
   sendText(text: string): boolean;
   /** true si el motor ya acuso el handshake. */
@@ -176,7 +191,7 @@ export function connectBridge(onMessage: (msg: BridgeMessage) => void): BridgeHa
 
   connect();
   return {
-    send(msg: ConfigMessage) {
+    send(msg: ConfigMessage | AvatarConfigMessage) {
       if (usable()) socket?.write(JSON.stringify(msg) + '\n');
     },
     sendText(text: string): boolean {

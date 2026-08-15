@@ -36,12 +36,6 @@ export interface TtsConfig {
    * el caracter se da con el ritmo, no con la voz.
    */
   rate: number;
-  /**
-   * Voz elegida a mano en el menu del avatar, con el formato de
-   * getAvailableVoices ("sapi:Nombre" | "edge:es-ES-...."). Manda sobre la voz
-   * del perfil del avatar. Vacio = la que traiga el perfil.
-   */
-  voiceId: string;
   /** Si true, se ignora `engine` y se usa siempre el local (sapi). */
   confidential: boolean;
 }
@@ -51,6 +45,5 @@ export const DEFAULT_TTS_CONFIG: TtsConfig = {
   edgeVoice: 'es-ES-AlvaroNeural',
   sapiVoice: 'Microsoft Helena Desktop',
   rate: 0,
-  voiceId: '',
   confidential: false,
 };
