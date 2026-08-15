@@ -295,6 +295,49 @@ Con una sola voz española instalada en Windows (Helena), lo que distingue a los
 avatares locales es el **ritmo** (`rate`), no el timbre. Para variedad real hacen
 falta más voces SAPI instaladas o Piper.
 
+### El personaje se mueve
+
+Un avatar puede tener **poses**. Viven en la carpeta hermana de su retrato
+(`assets/avatars/unit-a.png` → `assets/avatars/unit-a/`) con un PNG por pose:
+
+```
+assets/avatars/unit-a/
+  reposo.png     brazos abajo; tambien la de "escuchando"
+  hablando.png   manos abiertas, explicando
+  pensando.png   mano en la barbilla
+  saludo.png     mano en alto
+```
+
+La carpeta es opcional: un avatar sin ella se queda con su imagen fija y no pasa
+nada. Se exigen **todas o ninguna**, porque con un juego a medias una transición
+se quedaría sin uno de sus extremos y el personaje desaparecería a mitad del
+fundido.
+
+Dos cosas hacen que esto funcione con cuatro imágenes fijas:
+
+**Las poses están alineadas** sobre un lienzo común, ancladas por los pies y por
+el eje de la cabeza. Así el fundido entre dos poses deja el torso sólido y solo
+difumina los brazos: se lee como desenfoque de movimiento en vez de como una
+disolvencia. Recortadas a hueso, cada una tendría una proporción distinta y el
+robot pegaría un salto de tamaño al cambiar de estado.
+
+**Toda transición pasa por reposo.** Nunca se funde una pose con brazos contra
+otra pose con brazos —saldría un borrón de cuatro manos—, así que ir de
+"pensando" a "hablando" son dos tramos encadenados. Es un eje con centro, y lo
+comprueba un test que recorre todos los pares posibles.
+
+Encima de eso, el personaje **respira** siempre: una sinusoide que lo escala un
+1,8 % y lo levanta un par de píxeles, con el periodo que marca el estado
+(`STATE_RHYTHMS`), más deprisa pensando que en reposo. La respiración mueve la
+_geometría_, no repinta píxeles; solo se recompone la imagen mientras hay un
+fundido en curso.
+
+**Saludo no es un estado**, es un gesto: se dispara cuando el asistente saluda o
+devuelve el saludo, mira la mano y vuelve solo a reposo. Se detecta por lo que
+dice, exigiendo que el saludo abra la frase — así "hola, dime" saluda y "buenas
+noticias sobre el informe" no. Agitar la mano sin venir a cuento se nota mucho
+más que no saludar.
+
 ### Silenciar el micrófono
 
 El icono 🎤 de la ventana **cierra la captura**, no la ignora: ffmpeg muere y el

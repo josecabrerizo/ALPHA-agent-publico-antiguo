@@ -7,6 +7,7 @@
  */
 import { AvatarWindow } from './avatar-window.js';
 import { connectBridge } from './bridge-client.js';
+import { isGreeting } from './poses.js';
 import { log } from './log.js';
 
 const avatar = new AvatarWindow();
@@ -32,6 +33,13 @@ const bridge = connectBridge((msg) => {
   } else if (msg.type === 'assistant') {
     avatar.showCaption(msg.text);
     log(`ALPHA › ${msg.text}`);
+    // Si el asistente saluda (o devuelve el saludo), agita la mano. Se mira lo
+    // que DICE, no en que estado esta: saludar es algo que pasa una vez, no una
+    // fase del turno.
+    if (isGreeting(msg.text)) {
+      avatar.greet();
+      log('gesto: saludo');
+    }
   } else if (msg.type === 'devices') {
     avatar.setMicDevices(msg.inputs);
     log(`motor conectado · ${msg.inputs.length} micrófonos disponibles`);

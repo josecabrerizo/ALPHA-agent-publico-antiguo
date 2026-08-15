@@ -8,12 +8,16 @@ import {
   QAction,
   QPoint,
   QPixmap,
+  QImage,
+  QImageFormat,
+  QPainter,
   QMouseEvent,
   WidgetAttribute,
   WindowType,
   WidgetEventTypes,
   MouseButton,
   TextFormat,
+  GlobalColor,
   AspectRatioMode,
   TransformationMode,
 } from '@nodegui/nodegui';
@@ -24,6 +28,8 @@ import { log } from './log.js';
 import { STATE_CYCLE, STATE_RHYTHMS, MAX_PULSE, type AvatarState } from './states.js';
 import { AGENTS, AGENT_ORDER, type AgentId } from './agents.js';
 import { loadSettings, saveSettings, MODEL_OPTIONS, type Settings } from './settings.js';
+import { POSES, poseForState, posesDirFor, poseFile, breathAt, type Pose } from './poses.js';
+import { PoseAnimator } from './animator.js';
 
 const WIN_W = 280;
 // Zona visual del avatar: la ocupa el retrato del personaje o, si no hay imagen,
@@ -46,6 +52,20 @@ const PAD = 12; // margen lateral
 const GAP = 10; // separacion vertical entre piezas
 const INPUT_H = 34;
 const CAPTION_H = 116;
+
+/**
+ * Ritmo del bucle de animacion. 33 ms = 30 fps, de sobra para una respiracion y
+ * un fundido; componer un fotograma cuesta 0,08 ms, asi que el coste real lo
+ * pone Qt al reescalar, no nosotros.
+ */
+const FRAME_MS = 33;
+/**
+ * Cuanto crece el personaje al inspirar, en tanto por uno. Muy poco a
+ * proposito: la respiracion tiene que notarse sin que parezca que late.
+ */
+const BREATH_SCALE = 0.018;
+/** Y cuanto sube, en pixeles. Un avatar que solo escala parece un globo. */
+const BREATH_LIFT = 2.5;
 
 /**
  * Crea un submenu. Rodea un bug de NodeGui 0.74: `addMenu(titulo)` pasa al
@@ -88,6 +108,16 @@ export class AvatarWindow {
 
   /** Tamano base del retrato ya encajado; undefined = no hay imagen que pintar. */
   private portraitBase: { w: number; h: number } | undefined;
+  /**
+   * Poses ya escaladas a la caja del retrato. Se escalan UNA vez al cargar el
+   * avatar: reescalar 433x600 en cada fotograma seria tirar CPU por tener el
+   * personaje respirando.
+   */
+  private poses = new Map<Pose, QPixmap>();
+  private readonly animator = new PoseAnimator();
+  private frameTimer: NodeJS.Timeout | undefined;
+  /** Ultima mezcla pintada, para no recomponer un fotograma identico. */
+  private lastPainted = '';
   /** Perfiles que manda el motor: el es el dueno de los avatares. */
   private avatars: AvatarOption[] = [];
 
@@ -132,15 +162,25 @@ export class AvatarWindow {
   }
 
   /**
-   * Cambia el estado y REPINTA. Guardarlo sin mas dejaba escuchar/pensar/hablar
-   * indistinguibles en pantalla: el halo crece y se enciende segun el estado
-   * (la amplitud de STATE_RHYTHMS, ahora como tamano fijo en vez de latido).
+   * Cambia el estado: repinta el halo y pide la pose que le toca. La pose no
+   * cambia de golpe, se funde (ver PoseAnimator), y siempre pasando por reposo.
    */
   setState(state: AvatarState): void {
     if (state === this.state) return;
     this.state = state;
     this.paintOrb();
     this.layoutVisual();
+    this.animator.goTo(poseForState(state), Date.now());
+  }
+
+  /**
+   * Gesto puntual de saludo: agita la mano y vuelve solo a reposo. No es un
+   * estado —el asistente no esta "saludando" mientras dure el turno— sino algo
+   * que ocurre una vez, cuando saluda o devuelve el saludo.
+   */
+  greet(): void {
+    if (!this.poses.has('saludo')) return;
+    this.animator.gesture('saludo', Date.now());
   }
 
   /** Registra quien recibe los cambios de config (para mandarlos al motor). */
@@ -283,12 +323,108 @@ export class AvatarWindow {
     this.portraitBase = { w: scaled.width(), h: scaled.height() };
     this.portrait.setPixmap(scaled);
     this.portrait.show();
+    this.loadPoses(file);
     this.paintOrb();
     this.layoutVisual();
-    const isSvg = file.endsWith('.svg');
-    log(
-      `retrato: ${this.settings.agent} (${scaled.width()}×${scaled.height()})${isSvg ? ' [SVG animado]' : ''}`,
-    );
+    log(`retrato: ${this.settings.agent} (${scaled.width()}×${scaled.height()})`);
+  }
+
+  /**
+   * Carga las poses del avatar, si las tiene. Viven en la carpeta hermana del
+   * retrato (unit-a.png -> unit-a/), asi que un avatar sin poses simplemente no
+   * tiene carpeta y se queda con su imagen fija: nada se rompe por no tenerlas.
+   *
+   * Se exigen TODAS o ninguna. Con un juego a medias, una transicion se quedaria
+   * sin uno de sus extremos y el personaje desapareceria a mitad del fundido.
+   */
+  private loadPoses(portraitFile: string): void {
+    this.poses.clear();
+    const dir = posesDirFor(portraitFile);
+    const cargadas = new Map<Pose, QPixmap>();
+    for (const pose of POSES) {
+      const file = poseFile(dir, pose);
+      const pix = new QPixmap();
+      if (!existsSync(file) || !pix.load(file)) return this.sinPoses(dir);
+      cargadas.set(
+        pose,
+        pix.scaled(
+          PORTRAIT_MAX_W,
+          PORTRAIT_MAX_H,
+          AspectRatioMode.KeepAspectRatio,
+          TransformationMode.SmoothTransformation,
+        ),
+      );
+    }
+    this.poses = cargadas;
+    // El tamano lo marcan las poses, que estan todas en el mismo lienzo; asi el
+    // personaje no cambia de escala al cambiar de pose.
+    const base = cargadas.get('reposo');
+    if (base) this.portraitBase = { w: base.width(), h: base.height() };
+    this.startFrames();
+    log(`poses de ${this.settings.agent}: ${[...cargadas.keys()].join(', ')}`);
+  }
+
+  private sinPoses(dir: string): void {
+    this.poses.clear();
+    this.stopFrames();
+    log(`sin poses para "${this.settings.agent}" (${dir}); retrato fijo`);
+  }
+
+  /** Arranca el bucle de animacion. Idempotente. */
+  private startFrames(): void {
+    if (this.frameTimer) return;
+    this.frameTimer = setInterval(() => this.tick(), FRAME_MS);
+    // Que el temporizador no impida cerrar el proceso.
+    this.frameTimer.unref?.();
+  }
+
+  private stopFrames(): void {
+    if (!this.frameTimer) return;
+    clearInterval(this.frameTimer);
+    this.frameTimer = undefined;
+  }
+
+  /**
+   * Un fotograma. La respiracion es SIEMPRE (mueve la geometria, que es barato)
+   * y la mezcla de poses solo cuando hay fundido en curso: en reposo no se
+   * recompone ningun pixel.
+   */
+  private tick(): void {
+    if (this.poses.size === 0) return;
+    const now = Date.now();
+    const frame = this.animator.frameAt(now);
+
+    const clave = frame.moving ? `${frame.from}>${frame.to}@${frame.mix.toFixed(3)}` : frame.to;
+    if (clave !== this.lastPainted) {
+      this.lastPainted = clave;
+      const pix = frame.moving
+        ? this.blend(frame.from, frame.to, frame.mix)
+        : this.poses.get(frame.to);
+      if (pix) this.portrait.setPixmap(pix);
+    }
+
+    this.layoutVisual(breathAt(now, STATE_RHYTHMS[this.state].breatheMs));
+  }
+
+  /**
+   * Mezcla dos poses en una sola imagen. Como estan alineadas por la cabeza y
+   * los pies, el torso queda solido y solo se difuminan los brazos: se lee como
+   * desenfoque de movimiento y no como una disolvencia.
+   */
+  private blend(from: Pose, to: Pose, mix: number): QPixmap | undefined {
+    const a = this.poses.get(from);
+    const b = this.poses.get(to);
+    if (!a || !b) return undefined;
+    const img = new QImage(a.width(), a.height(), QImageFormat.ARGB32_Premultiplied);
+    img.fill(GlobalColor.transparent);
+    const p = new QPainter();
+    if (!p.begin(img)) return undefined;
+    p.setOpacity(1 - mix);
+    p.drawPixmap(0, 0, a);
+    p.setOpacity(mix);
+    p.drawPixmap(0, 0, b);
+    p.end();
+    return QPixmap.fromImage(img, 0);
   }
 
   /** Bocadillo de texto bajo el orbe. Oculto hasta que llega algo que decir. */
@@ -602,11 +738,15 @@ export class AvatarWindow {
   }
 
   /**
-   * Coloca retrato y halo. Sin animacion (la respiracion sinusoidal se quito y
-   * el dinamismo se replanteara), pero el TAMANO del halo depende del estado:
-   * es lo que hace distinguibles escuchando, pensando y hablando de un vistazo.
+   * Coloca retrato y halo. El TAMANO del halo depende del estado —es lo que
+   * hace distinguibles escuchando, pensando y hablando de un vistazo— y el
+   * retrato respira: `breath` (-1..1) lo escala y lo levanta un poco.
+   *
+   * La respiracion se hace moviendo la GEOMETRIA, no repintando pixeles: la
+   * etiqueta tiene setScaledContents, asi que Qt reescala el pixmap ya cargado.
+   * Sale gratis comparado con recomponer la imagen en cada fotograma.
    */
-  private layoutVisual(): void {
+  private layoutVisual(breath = 0): void {
     const radius = BASE_RADIUS + STATE_RHYTHMS[this.state].pulse;
     this.orb.setGeometry(
       Math.round(ORB_CX - radius),
@@ -615,12 +755,18 @@ export class AvatarWindow {
       radius * 2,
     );
     if (!this.portraitBase) return;
-    // Anclado por abajo: los pies del personaje quedan al ras del bocadillo.
     const { w, h } = this.portraitBase;
-    this.portrait.setGeometry(Math.round(ORB_CX - w / 2), VISUAL_BOTTOM - h, w, h);
+    const escala = 1 + BREATH_SCALE * breath;
+    const bw = Math.round(w * escala);
+    const bh = Math.round(h * escala);
+    const alza = Math.round(BREATH_LIFT * breath);
+    // Anclado por abajo: los pies del personaje quedan al ras del bocadillo, y
+    // al inspirar crece hacia ARRIBA en vez de hundirse en el suelo.
+    this.portrait.setGeometry(Math.round(ORB_CX - bw / 2), VISUAL_BOTTOM - bh - alza, bw, bh);
   }
 
   dispose(): void {
     if (this.captionTimer) clearTimeout(this.captionTimer);
+    this.stopFrames();
   }
 }
