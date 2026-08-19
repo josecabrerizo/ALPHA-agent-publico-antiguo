@@ -1,0 +1,15 @@
+{
+  "name": "@alpha/protocol",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Protocolo del puente motor<->avatar de A.L.P.H.A.: mensajes, framing, servidor y cliente",
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc --build",
+    "prepare": "tsc --build",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-exclude=\"src/**/*.test.ts\" \"src/**/*.test.ts\""
+  }
+}

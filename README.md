@@ -227,16 +227,22 @@ Monorepo con el cerebro separado de la cara por un contrato explícito:
 
 ```
 packages/
+  protocol/    Contrato del puente motor↔avatar: mensajes, puerto, token,
+               framing y las dos puntas del socket. Lo importan los otros dos.
   engine/      Motor headless. Sin UI. Todo el cerebro y la E/S.
     audio/     captura (ffmpeg) + VAD
     stt/       transcripción (whisper.cpp)
     spikes/    guiones ejecutables para validar cada capa por separado
     brain/     cerebro compatible-OpenAI + herramientas + skills
-    conversation/  bucle escuchar→pensar→hablar + puente con el avatar
+    conversation/  bucle escuchar→pensar→hablar
     tts/       voz (Edge online / SAPI local)
     config/    esquema unificado + carga por capas + perfiles de avatar
   ui-avatar/   App NodeGui: retrato flotante, menú de configuración y chat escrito
 ```
+
+`@alpha/protocol` se compila a `dist/` (lo hace `npm install` solo, y también
+`npm run typecheck`); si lo tocas y vas a lanzar un spike directamente, refresca
+con `npm run build -w @alpha/protocol`.
 
 La ventana (Qt) no se puede probar sin levantar Qt, así que lo que sí tiene
 prueba en `ui-avatar` es lo que vive fuera de ella: la validación de los ajustes
@@ -245,10 +251,13 @@ Por eso `mergeSettings` y `takeLines` son funciones aparte y no código dentro
 del manejador del socket.
 
 El motor no sabe que existe una UI: expone un **puente TCP local** (127.0.0.1,
-con token de sesión) y la app del avatar es un cliente delgado. Esto no es
-ceremonia — es lo que permite cambiar NodeGui por otra capa de presentación sin
-reescribir el cerebro. El avatar es el panel de control: lo que se configura en
-su menú (agente, modelo, sonido, privacidad) viaja al motor por ese puente.
+con token de sesión que se deja en `~/.alpha/`) y la app del avatar es un
+cliente delgado. Esto no es ceremonia — es lo que permite cambiar NodeGui por
+otra capa de presentación sin reescribir el cerebro. El avatar es el panel de
+control: lo que se configura en su menú (agente, modelo, sonido, privacidad)
+viaja al motor por ese puente. El protocolo entero —tipos de mensaje, puerto,
+ruta del token, framing— tiene una sola definición en `packages/protocol`;
+antes cada lado llevaba su copia a mano y podían divergir.
 
 El puente va en los dos sentidos, y **manda el motor**: él es el dueño de los
 perfiles de avatar y de la lista de micrófonos, y los envía al conectar. Si

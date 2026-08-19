@@ -2,11 +2,11 @@
  * Arranque de la UI del avatar de A.L.P.H.A.
  *
  * Ejecutar con qode (no con node): `npm run dev` en este paquete.
- * El motor headless se conectara mas adelante por WebSocket para mandar
- * cambios de estado; por ahora la ventana es autonoma.
+ * Con el motor se habla por el puente de @alpha/protocol (TCP local, un JSON
+ * por linea); si el motor no esta, la ventana funciona sola y reintenta.
  */
 import { AvatarWindow } from './avatar-window.js';
-import { connectBridge } from './bridge-client.js';
+import { connectBridge } from '@alpha/protocol';
 import { isGreeting } from './poses.js';
 import { log } from './log.js';
 

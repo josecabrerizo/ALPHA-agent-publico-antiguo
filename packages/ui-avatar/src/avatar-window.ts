@@ -23,12 +23,7 @@ import {
 } from '@nodegui/nodegui';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import type {
-  AvatarConfigMessage,
-  AvatarOption,
-  ModelOption,
-  VoiceOption,
-} from './bridge-client.js';
+import type { AvatarConfigMessage, AvatarOption, ModelOption, VoiceOption } from '@alpha/protocol';
 import { log } from './log.js';
 import { STATE_CYCLE, STATE_RHYTHMS, MAX_PULSE, type AvatarState } from './states.js';
 import { AGENTS, AGENT_ORDER, type AgentId } from './agents.js';

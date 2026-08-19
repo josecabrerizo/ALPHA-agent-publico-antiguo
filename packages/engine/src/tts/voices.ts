@@ -3,7 +3,7 @@
  * El motor manda esta lista al avatar para que el usuario pueda elegir.
  */
 import { spawn } from 'node:child_process';
-import type { VoiceOption } from '../conversation/avatar-bridge.js';
+import type { VoiceOption } from '@alpha/protocol';
 
 /**
  * Lee las voces SAPI instaladas en Windows. Devuelve [] en otros SO o si

@@ -1,4 +1,8 @@
 {
   "files": [],
-  "references": [{ "path": "./packages/engine" }, { "path": "./packages/ui-avatar" }]
+  "references": [
+    { "path": "./packages/protocol" },
+    { "path": "./packages/engine" },
+    { "path": "./packages/ui-avatar" }
+  ]
 }

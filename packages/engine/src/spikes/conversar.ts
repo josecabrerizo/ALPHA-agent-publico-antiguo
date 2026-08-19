@@ -29,10 +29,10 @@ import { ConversationSession, type ConversationState } from '../conversation/ses
 import {
   AvatarBridge,
   AVATAR_BRIDGE_PORT,
-  type AlphaConfigMessage,
+  type ConfigMessage,
   type AvatarConfigMessage,
   type ModelOption,
-} from '../conversation/avatar-bridge.js';
+} from '@alpha/protocol';
 
 /** Marca de tiempo estilo Java: HH:MM:SS.mmm. */
 function stamp(): string {
@@ -344,7 +344,7 @@ bridge.onAvatarConfigMessage((msg) => {
   });
 });
 
-async function applyConfig(msg: AlphaConfigMessage): Promise<void> {
+async function applyConfig(msg: ConfigMessage): Promise<void> {
   const s = msg.settings;
 
   // Silenciar el microfono: independiente del resto: sigue valiendo el chat
