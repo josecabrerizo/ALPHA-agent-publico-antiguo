@@ -22,9 +22,11 @@
   },
   "dependencies": {
     "@alpha/protocol": "0.0.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "audify": "^1.10.1",
     "msedge-tts": "^2.0.7",
     "openai": "^6.48.0",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
   }
 }

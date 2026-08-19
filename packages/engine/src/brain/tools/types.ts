@@ -27,6 +27,12 @@ export interface Tool {
    */
   destructive?: boolean;
   /**
+   * false si la herramienta manda datos FUERA de la maquina (un servidor MCP
+   * remoto). undefined = local: las builtin y las skills no salen a la red.
+   * En modo confidencial, las no locales ni se ensenan al modelo.
+   */
+  local?: boolean;
+  /**
    * Ejecuta la herramienta. `args` viene del JSON que produce el MODELO: esta
    * parseado, pero sus valores pueden ser cualquier cosa aunque el esquema pida
    * un string. Para leer texto, `textArg`.

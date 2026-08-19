@@ -113,6 +113,11 @@ function validate(config: AlphaConfig): void {
   if (!config.stt.language || typeof config.stt.language !== 'string') {
     config.stt.language = DEFAULT_CONFIG.stt.language;
   }
+  // La forma de cada servidor la valida el adaptador MCP; aqui solo se
+  // garantiza que haya un mapa por el que iterar.
+  if (!isPlainObject(config.mcp) || !isPlainObject(config.mcp.servers)) {
+    config.mcp = structuredClone(DEFAULT_CONFIG.mcp);
+  }
 }
 
 /** Fusion profunda: los objetos planos se mezclan; arrays y primitivos reemplazan. */

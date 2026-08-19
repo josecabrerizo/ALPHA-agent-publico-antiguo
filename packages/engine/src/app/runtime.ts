@@ -22,6 +22,7 @@ import {
   type AvatarProfilePatch,
 } from '../config/avatars.js';
 import { saveLiveSettings } from '../config/settings-store.js';
+import { connectMcpProviders } from '../brain/mcp/provider.js';
 import { isGreeting } from '../conversation/greeting.js';
 import { ConversationSession, type ConversationState } from '../conversation/session.js';
 import type { AlphaConfig } from '../config/schema.js';
@@ -108,6 +109,20 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
   const skills = new SkillLibrary(skillsDir);
   await skills.load();
   const tools = new ToolRegistry().registerAll(BUILTIN_TOOLS).registerAll(skills.tools());
+
+  // Servidores MCP declarados en la config: sus tools entran al MISMO registro
+  // que las builtin y las skills. Un servidor caido se dice y se omite; los no
+  // locales quedan sujetos al contrato confidencial (dos capas: el cerebro no
+  // los ensena y su run() se niega).
+  const mcpProviders = await connectMcpProviders(config.mcp.servers, log);
+  for (const provider of mcpProviders) {
+    for (const tool of provider.tools()) {
+      // register() sobrescribe en silencio; una colision entre servidores (o
+      // con una builtin) merece decirse antes de pisar.
+      if (tools.has(tool.name)) log(`✗ [mcp] herramienta duplicada "${tool.name}": se sobrescribe`);
+      tools.register(tool);
+    }
+  }
 
   // Toman los valores por parametro (no del cierre) para poder construir y
   // validar candidatos ANTES de comprometer el estado — reconfiguracion
@@ -447,6 +462,11 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
     stop: () => {
       session.stop();
       bridge.stop();
+      // Cerrar es cortesia (mata el proceso hijo de un stdio); un fallo aqui
+      // no puede impedir el apagado.
+      for (const provider of mcpProviders) {
+        provider.close().catch(() => {});
+      }
     },
   };
 }

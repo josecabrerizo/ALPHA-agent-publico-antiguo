@@ -139,7 +139,14 @@ export class Brain {
       ...(opts.signal ? { signal: opts.signal } : {}),
       timeout: opts.timeoutMs ?? 120_000,
     };
-    const tools = this.tools?.list().map(toOpenAITool);
+    // Primera capa del contrato confidencial: las herramientas que sacan datos
+    // de la maquina (local === false, p. ej. un servidor MCP remoto) ni se
+    // ensenan al modelo. La segunda capa vive en el run() del adaptador,
+    // porque el registro sobrevive al cambio de avatar en caliente.
+    const tools = this.tools
+      ?.list()
+      .filter((t) => !this.config.confidential || t.local !== false)
+      .map(toOpenAITool);
     // messages lleva el intercambio completo del turno (incluye tool_calls y
     // resultados), que la API tipa de forma farragosa; se maneja como arreglo
     // laxo y se castea en la llamada.
