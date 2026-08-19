@@ -49,3 +49,18 @@ export {
   type VoiceEngine,
   type VoiceBackend,
 } from './tts/types.js';
+export {
+  startEngineRuntime,
+  type EngineRuntime,
+  type EngineRuntimeCallbacks,
+  type EngineRuntimeInfo,
+} from './app/runtime.js';
+export { ConversationSession, type ConversationState } from './conversation/session.js';
+export { isGreeting } from './conversation/greeting.js';
+export { loadConfig } from './config/loader.js';
+export {
+  loadAvatars,
+  parseAvatars,
+  type AvatarProfile,
+  type AvatarVoice,
+} from './config/avatars.js';

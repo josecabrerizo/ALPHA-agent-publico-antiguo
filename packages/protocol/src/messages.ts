@@ -9,11 +9,22 @@
  * Version del protocolo. Viaja en el handshake (auth y ready) para que un
  * motor y un avatar de versiones distintas se delaten con un aviso en vez de
  * fallar mudos. Subirla solo cuando cambie la FORMA de un mensaje existente.
+ *
+ * v2: AvatarOption pasa de `image` (ruta absoluta) a `imageId` + `color`.
  */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 /** Estados que la UI sabe pintar. El motor mapea aqui su estado interno. */
 export type AvatarWireState = 'reposo' | 'escuchando' | 'pensando' | 'hablando';
+
+/** Gestos puntuales del personaje. Un gesto ocurre una vez; no es un estado. */
+export type AvatarGesture = 'saludo';
+
+/** Color RGB (0..255) del orbe de identidad. */
+export type OrbColor = [number, number, number];
+
+/** Color neutro para un perfil que no declara el suyo. */
+export const DEFAULT_ORB_COLOR: OrbColor = [95, 155, 210];
 
 /** Un perfil de avatar, tal como lo necesita la UI para pintar su menu. */
 export interface AvatarOption {
@@ -24,8 +35,14 @@ export interface AvatarOption {
   model: string;
   confidential: boolean;
   voice: { engine: 'sapi' | 'edge'; name: string; rate: number };
-  /** Ruta absoluta de la imagen (mismo equipo, otro proceso). */
-  image: string;
+  /**
+   * Identificador del juego de arte (retrato y poses), NO una ruta: la UI lo
+   * resuelve contra su propia carpeta de assets. Antes viajaba una ruta
+   * absoluta, que ataba a motor y avatar al mismo checkout.
+   */
+  imageId: string;
+  /** Color de identidad del orbe. */
+  color: OrbColor;
 }
 
 /** Modelo que el motor puede resolver y ofrecer en el menu. */
@@ -52,6 +69,8 @@ export type EngineToAvatarMessage =
   /** Acuse del handshake: hasta recibirlo, el avatar no esta autenticado. */
   | { type: 'ready'; version: number }
   | { type: 'state'; state: AvatarWireState }
+  /** Gesto puntual decidido por el MOTOR (la UI no infiere nada del texto). */
+  | { type: 'gesture'; gesture: AvatarGesture }
   | { type: 'user'; text: string }
   | { type: 'assistant'; text: string }
   | { type: 'devices'; inputs: { name: string; isDefault: boolean }[]; current?: string }

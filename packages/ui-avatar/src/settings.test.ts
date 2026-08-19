@@ -4,10 +4,9 @@ import { mergeSettings, DEFAULT_SETTINGS } from './settings.js';
 import { AGENT_ORDER } from './agents.js';
 
 /**
- * El fichero de ajustes lo escribe el avatar, pero tambien puede editarlo una
+ * El fichero es la cache de presentacion de la UI, pero puede editarlo una
  * persona o quedarse a medias en un apagon. Lo que se prueba aqui es que un
- * fichero raro no tumbe la ventana: antes se volcaba tal cual sobre los
- * defaults y un `agent` inventado reventaba al buscar su color en AGENTS.
+ * fichero raro no tumbe la ventana: los tipos equivocados caen a los defaults.
  *
  * Se prueba mergeSettings, no loadSettings: leer de disco tocaria la
  * configuracion de verdad de quien ejecute los tests.
@@ -19,9 +18,15 @@ test('un fichero al que le faltan claves se completa con los defaults', () => {
   assert.equal(s.micEnabled, DEFAULT_SETTINGS.micEnabled);
 });
 
-test('un agente que no existe cae al de por defecto', () => {
-  assert.equal(mergeSettings({ agent: 'clippy' }).agent, DEFAULT_SETTINGS.agent);
+test('un agente desconocido se conserva: la lista la manda el motor', () => {
+  // Antes se filtraba contra el catalogo local y un quinto avatar del motor no
+  // podia sobrevivir a un reinicio de la UI. El orbe cae al color neutro.
+  assert.equal(mergeSettings({ agent: 'quinto' }).agent, 'quinto');
+});
+
+test('un agente que no es texto (o esta vacio) cae al de por defecto', () => {
   assert.equal(mergeSettings({ agent: 42 }).agent, DEFAULT_SETTINGS.agent);
+  assert.equal(mergeSettings({ agent: '   ' }).agent, DEFAULT_SETTINGS.agent);
 });
 
 test('los tipos equivocados no entran', () => {

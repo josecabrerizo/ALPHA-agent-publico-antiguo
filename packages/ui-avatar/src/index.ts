@@ -7,7 +7,6 @@
  */
 import { AvatarWindow } from './avatar-window.js';
 import { connectBridge } from '@alpha/protocol';
-import { isGreeting } from './poses.js';
 import { log } from './log.js';
 
 const avatar = new AvatarWindow();
@@ -20,26 +19,26 @@ avatar.show();
 // muestra el ultimo texto. Si el motor no esta, reintenta hasta que aparezca.
 const bridge = connectBridge((msg) => {
   if (msg.type === 'ready') {
-    // No se reenvia la config: el motor lee el mismo alpha.settings.json al
-    // arrancar y ademas puede tener overrides propios (ALPHA_CONFIDENCIAL). Lo
-    // que manda es lo que el motor diga que tiene puesto.
+    // No se reenvia la config: el motor es el dueno de la configuracion (el la
+    // persiste; lo que esta UI guarda en ~/.alpha es presentacion para antes
+    // de conectar). Manda lo que el motor diga que tiene puesto.
     log('motor autenticado: el avatar ya manda y recibe');
   } else if (msg.type === 'state') {
     avatar.setState(msg.state);
     log(`estado: ${msg.state}`);
+  } else if (msg.type === 'gesture') {
+    // El gesto lo decide el motor; la UI solo lo ejecuta. Saludar es algo que
+    // pasa una vez, no una fase del turno.
+    if (msg.gesture === 'saludo') {
+      avatar.greet();
+      log('gesto: saludo');
+    }
   } else if (msg.type === 'user') {
     avatar.showCaption(`tú: ${msg.text}`);
     log(`tú    › ${msg.text}`);
   } else if (msg.type === 'assistant') {
     avatar.showCaption(msg.text);
     log(`ALPHA › ${msg.text}`);
-    // Si el asistente saluda (o devuelve el saludo), agita la mano. Se mira lo
-    // que DICE, no en que estado esta: saludar es algo que pasa una vez, no una
-    // fase del turno.
-    if (isGreeting(msg.text)) {
-      avatar.greet();
-      log('gesto: saludo');
-    }
   } else if (msg.type === 'devices') {
     avatar.setMicDevices(msg.inputs);
     log(`motor conectado · ${msg.inputs.length} micrófonos disponibles`);
