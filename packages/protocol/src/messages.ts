@@ -23,8 +23,12 @@ export type AvatarGesture = 'saludo';
 /** Color RGB (0..255) del orbe de identidad. */
 export type OrbColor = [number, number, number];
 
-/** Color neutro para un perfil que no declara el suyo. */
-export const DEFAULT_ORB_COLOR: OrbColor = [95, 155, 210];
+/**
+ * Color neutro para un perfil que no declara el suyo: un gris azulado que NO
+ * es el de ningun avatar fundador, para que "sin color declarado" se vea como
+ * tal y no se disfrace de otra identidad.
+ */
+export const DEFAULT_ORB_COLOR: OrbColor = [150, 160, 175];
 
 /** Un perfil de avatar, tal como lo necesita la UI para pintar su menu. */
 export interface AvatarOption {
