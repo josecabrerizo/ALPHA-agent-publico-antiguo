@@ -202,6 +202,67 @@ test('tools/list paginado: se siguen los nextCursor hasta agotar', async () => {
   }
 });
 
+test('un esquema con $defs y $ref viaja entero, no reconstruido', async () => {
+  // Servidor de bajo nivel para controlar el JSON Schema crudo: el registro
+  // de alto nivel lo generaria desde zod y no tendria $defs.
+  const schema = {
+    type: 'object' as const,
+    properties: { destino: { $ref: '#/$defs/ruta' } },
+    required: ['destino'],
+    $defs: { ruta: { type: 'string', description: 'una ruta' } },
+  };
+  const server = new Server(
+    { name: 'con-defs', version: '1.0.0' },
+    { capabilities: { tools: {} } },
+  );
+  server.setRequestHandler(ListToolsRequestSchema, () => ({
+    tools: [{ name: 'mueve', description: 'x', inputSchema: schema }],
+  }));
+  server.setRequestHandler(CallToolRequestSchema, () => ({
+    content: [{ type: 'text', text: 'x' }],
+  }));
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const provider = await McpToolProvider.connect(cfg(), { transport: clientTransport });
+  try {
+    const params = provider.tools()[0]!.parameters;
+    assert.deepEqual(params['$defs'], schema.$defs, 'sin los $defs, el $ref queda colgando');
+    assert.deepEqual(params.properties, schema.properties);
+    assert.deepEqual(params.required, ['destino']);
+  } finally {
+    await provider.close();
+    await server.close();
+  }
+});
+
+test('un recurso embebido con texto entrega su texto, no solo la uri', async () => {
+  await withProvider(
+    cfg(),
+    (server) => {
+      server.registerTool(
+        'lee_fichero',
+        { description: 'Devuelve el contenido como recurso embebido.', inputSchema: {} },
+        async () => ({
+          content: [
+            {
+              type: 'resource',
+              resource: {
+                uri: 'file:///notas.txt',
+                mimeType: 'text/plain',
+                text: 'contenido real',
+              },
+            },
+          ],
+        }),
+      );
+    },
+    async (provider) => {
+      const result = await provider.tools()[0]!.run({}, { confidential: false });
+      assert.equal(result, 'contenido real', 'la uri sola dejaria al modelo sin el resultado');
+    },
+  );
+});
+
 test('si el arranque falla o expira, el transporte se cierra (sin hijos huerfanos)', async () => {
   // Solo la punta cliente del par: nadie contesta al otro lado y el connect
   // expira. Lo observable es el close del transporte, que es lo que mata al
