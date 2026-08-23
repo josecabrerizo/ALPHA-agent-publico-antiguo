@@ -191,7 +191,14 @@ function adaptTool(
         return 'Herramienta bloqueada: el modo confidencial no permite herramientas que saquen datos de la maquina.';
       }
       const result = await client.callTool({ name, arguments: args });
-      const text = flattenContent(result.content);
+      // Un resultado ESTRUCTURADO sin texto (tools con outputSchema que no lo
+      // duplican como content) tambien es resultado: serializado antes que
+      // "(sin resultado)", que dejaba al modelo sin el JSON devuelto.
+      const structured = (result as { structuredContent?: unknown }).structuredContent;
+      const text =
+        flattenContent(result.content) ||
+        (structured !== undefined ? JSON.stringify(structured) : '') ||
+        '(sin resultado)';
       return result.isError ? `Error de la herramienta: ${text}` : text;
     },
   };
@@ -233,7 +240,7 @@ function adaptSchema(inputSchema: unknown): JsonSchema {
  * devuelve al modelo. Lo no textual se nombra en vez de perderse en silencio.
  */
 function flattenContent(content: unknown): string {
-  if (!Array.isArray(content)) return '(sin resultado)';
+  if (!Array.isArray(content)) return '';
   const parts: string[] = [];
   for (const item of content) {
     const c = item as Record<string, unknown>;
@@ -254,7 +261,9 @@ function flattenContent(content: unknown): string {
       }
     }
   }
-  return parts.join('\n').trim() || '(sin resultado)';
+  // Vacio es vacio: el fallback ("(sin resultado)" o el structuredContent
+  // serializado) lo decide quien llama, que ve el resultado completo.
+  return parts.join('\n').trim();
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
