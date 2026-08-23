@@ -82,7 +82,10 @@ export function registerFaceTools(server: McpServer, face: FaceLike): void {
       description:
         'Recoge lo que el usuario haya escrito en el chat del avatar desde la ultima lectura. Cada mensaje se entrega una sola vez.',
       inputSchema: {},
-      annotations: { readOnlyHint: true },
+      // NO es read-only: leer DRENA el buzon (cada mensaje se entrega una
+      // sola vez), y un host que auto-apruebe o reintente las read-only
+      // consumiria especulativamente la unica copia.
+      annotations: { readOnlyHint: false },
     },
     async () => {
       const mensajes = face.leerMensajes();

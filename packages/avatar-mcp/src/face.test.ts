@@ -108,7 +108,15 @@ const tipos = (c: FakeClient) => c.mensajes.map((m) => m.type);
 
 test('al autenticarse, la fachada se presenta como lo haria el motor', async () => {
   await withFace({ activeId: 'nexus' }, async (_face, cliente) => {
-    assert.deepEqual(tipos(cliente), ['ready', 'mic', 'avatars', 'devices', 'voices', 'models']);
+    assert.deepEqual(tipos(cliente), [
+      'ready',
+      'mic',
+      'state',
+      'avatars',
+      'devices',
+      'voices',
+      'models',
+    ]);
     const mic = cliente.mensajes.find((m) => m.type === 'mic');
     assert.equal(mic?.type === 'mic' && mic.enabled, false, 'la fachada nunca captura');
     const avatars = cliente.mensajes.find((m) => m.type === 'avatars');
@@ -127,14 +135,29 @@ test('decir hace la coreografia entera: hablando, texto, voz, reposo', async () 
   await withFace({ speaker }, async (face, cliente) => {
     await face.decir('hola humano');
     await tick();
-    const despues = tipos(cliente).slice(6); // tras la presentacion
+    const despues = tipos(cliente).slice(7); // tras la presentacion
     assert.deepEqual(despues, ['state', 'assistant', 'state']);
     const estados = cliente.mensajes.filter((m) => m.type === 'state');
     assert.deepEqual(
       estados.map((m) => (m.type === 'state' ? m.state : '')),
-      ['hablando', 'reposo'],
+      // El primer reposo es la pose actual del saludo de presentacion.
+      ['reposo', 'hablando', 'reposo'],
     );
     assert.deepEqual(speaker.spoken, ['hola humano'], 'la voz dice exactamente el texto');
+  });
+});
+
+test('un cliente que llega tarde recibe la pose ACTUAL, no la de defecto', async () => {
+  await withFace({}, async (face, primero) => {
+    face.estado('pensando');
+    await tick();
+    // Un segundo cliente (o el primero reconectando): las difusiones previas
+    // a su conexion no existen para el — el saludo debe traer la pose viva.
+    const segundo = await conectarCliente();
+    const st = segundo.mensajes.find((m) => m.type === 'state');
+    assert.equal(st?.type === 'state' && st.state, 'pensando');
+    assert.ok(primero.mensajes.length > 0);
+    segundo.cerrar();
   });
 });
 
@@ -142,7 +165,7 @@ test('decir con gesto intercala el gesto tras el texto', async () => {
   await withFace({}, async (face, cliente) => {
     await face.decir('hola', { gesto: 'saludo' });
     await tick();
-    assert.deepEqual(tipos(cliente).slice(6), ['state', 'assistant', 'gesture', 'state']);
+    assert.deepEqual(tipos(cliente).slice(7), ['state', 'assistant', 'gesture', 'state']);
   });
 });
 
@@ -154,7 +177,7 @@ test('dos decir concurrentes no se solapan: la cola serializa el habla', async (
     await tick();
     assert.deepEqual(speaker.spoken, ['primero', 'segundo'], 'en orden, no a la vez');
     assert.deepEqual(
-      tipos(cliente).slice(6),
+      tipos(cliente).slice(7),
       ['state', 'assistant', 'state', 'state', 'assistant', 'state'],
       'la coreografia ENTERA de uno antes de empezar la del otro',
     );
@@ -163,7 +186,8 @@ test('dos decir concurrentes no se solapan: la cola serializa el habla', async (
       .map((m) => (m.type === 'state' ? m.state : ''));
     assert.deepEqual(
       estados,
-      ['hablando', 'reposo', 'hablando', 'reposo'],
+      // El primer reposo es el del saludo de presentacion.
+      ['reposo', 'hablando', 'reposo', 'hablando', 'reposo'],
       'sin cola, el primero en terminar mandaba reposo con el otro aun hablando',
     );
   });
@@ -188,7 +212,7 @@ test('saludar sin texto solo agita la mano', async () => {
   await withFace({}, async (face, cliente) => {
     await face.saludar();
     await tick();
-    assert.deepEqual(tipos(cliente).slice(6), ['gesture']);
+    assert.deepEqual(tipos(cliente).slice(7), ['gesture']);
   });
 });
 

@@ -117,6 +117,10 @@ export class FaceController {
     // fachada NO captura nunca, y la cache de la UI puede venir de una sesion
     // con el motor real mostrando "Escuchando" sobre una captura que no existe.
     this.bridge.broadcast({ type: 'mic', enabled: false });
+    // Y la pose ACTUAL: un cliente que llega (o reconecta) a mitad de un
+    // "pensando" largo se quedaria con su pose por defecto hasta el siguiente
+    // cambio — las difusiones anteriores a su conexion no existen para el.
+    this.bridge.broadcast({ type: 'state', state: this.poseActual });
     this.sendAvatars();
     this.bridge.broadcast({ type: 'devices', inputs: [] });
     this.bridge.broadcast({ type: 'voices', list: [] });
@@ -137,8 +141,12 @@ export class FaceController {
     this.bridge.broadcast({ type: 'avatars', list, current: this.active.id });
   }
 
+  /** Pose actual: para saludar con ella a un cliente que llegue tarde. */
+  private poseActual: AvatarWireState = 'reposo';
+
   /** Estado del orbe/pose. La UI lo anima; aqui solo se difunde. */
   estado(state: AvatarWireState): void {
+    this.poseActual = state;
     this.bridge.broadcast({ type: 'state', state });
   }
 
