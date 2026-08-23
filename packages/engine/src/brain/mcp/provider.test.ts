@@ -263,6 +263,36 @@ test('un recurso embebido con texto entrega su texto, no solo la uri', async () 
   );
 });
 
+test('un resultado estructurado sin texto llega serializado, no "(sin resultado)"', async () => {
+  // Servidor de bajo nivel: el de alto nivel duplica el structuredContent
+  // como texto, y lo que se prueba es justo el caso en que NO viene texto.
+  const server = new Server(
+    { name: 'estructurado', version: '1.0.0' },
+    { capabilities: { tools: {} } },
+  );
+  server.setRequestHandler(ListToolsRequestSchema, () => ({
+    tools: [{ name: 'mide', description: 'x', inputSchema: { type: 'object' as const } }],
+  }));
+  server.setRequestHandler(CallToolRequestSchema, () => ({
+    content: [],
+    structuredContent: { total: 42, unidad: 'ms' },
+  }));
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const provider = await McpToolProvider.connect(cfg(), { transport: clientTransport });
+  try {
+    const result = await provider.tools()[0]!.run({}, { confidential: false });
+    assert.equal(
+      result,
+      JSON.stringify({ total: 42, unidad: 'ms' }),
+      'el JSON devuelto es el resultado; perderlo deja al modelo a ciegas',
+    );
+  } finally {
+    await provider.close();
+    await server.close();
+  }
+});
+
 test('si el arranque falla o expira, el transporte se cierra (sin hijos huerfanos)', async () => {
   // Solo la punta cliente del par: nadie contesta al otro lado y el connect
   // expira. Lo observable es el close del transporte, que es lo que mata al
