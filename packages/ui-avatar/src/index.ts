@@ -6,7 +6,7 @@
  * por linea); si el motor no esta, la ventana funciona sola y reintenta.
  */
 import { AvatarWindow } from './avatar-window.js';
-import { connectBridge, type ConfigMessage } from '@alpha/protocol';
+import { connectBridge, type AvatarConfigMessage, type ConfigMessage } from '@alpha/protocol';
 import { log } from './log.js';
 
 const avatar = new AvatarWindow();
@@ -19,6 +19,11 @@ avatar.show();
 // que importa es el mute pre-arranque — es una promesa de privacidad y no
 // puede perderse en silencio (la cache de ~/.alpha es solo presentacion).
 let pendiente: ConfigMessage['settings'] = {};
+// Los cambios de PERFIL (modelo, voz, confidencial de un avatar) tambien: el
+// menu sigue operativo con los catalogos cacheados durante un reinicio del
+// motor, y "activar confidencial" descartado en silencio dejaria al perfil
+// usando la nube creyendose local.
+const pendientesPerfil: AvatarConfigMessage[] = [];
 
 // Conexion con el motor: refleja el estado de la conversacion en el orbe y
 // muestra el ultimo texto. Si el motor no esta, reintenta hasta que aparezca.
@@ -33,6 +38,11 @@ const bridge = connectBridge((msg) => {
       pendiente = {};
       if (bridge.send({ type: 'config', settings: parche })) {
         log(`config pendiente → motor: ${JSON.stringify(parche)}`);
+      }
+    }
+    for (const mensaje of pendientesPerfil.splice(0)) {
+      if (bridge.send(mensaje)) {
+        log(`perfil pendiente → motor: avatar=${mensaje.avatarId}`);
       }
     }
   } else if (msg.type === 'state') {
@@ -93,8 +103,16 @@ avatar.setOnSettingsChanged((patch) => {
 });
 
 avatar.setOnAvatarSettingsChanged((message) => {
-  bridge.send(message);
-  log(`perfil → motor: avatar=${message.avatarId}, cambios=${JSON.stringify(message.settings)}`);
+  // Sin motor, el cambio de perfil se guarda para reenviarlo al autenticar; y
+  // el log dice la verdad (antes anunciaba "enviado" sobre un send ignorado).
+  if (bridge.send(message)) {
+    log(`perfil → motor: avatar=${message.avatarId}, cambios=${JSON.stringify(message.settings)}`);
+  } else {
+    pendientesPerfil.push(message);
+    log(
+      `perfil pendiente (sin motor): avatar=${message.avatarId}, cambios=${JSON.stringify(message.settings)}`,
+    );
+  }
 });
 
 // Chat escrito: Enter en el campo del avatar manda el texto al motor.
