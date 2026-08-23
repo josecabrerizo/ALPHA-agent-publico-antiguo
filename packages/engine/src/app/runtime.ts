@@ -183,16 +183,25 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
   // otra instancia (probar cambios sin matar la que este en uso).
   const bridgePort = Number(process.env['ALPHA_BRIDGE_PORT']) || AVATAR_BRIDGE_PORT;
   const bridge = new AvatarBridge(bridgePort);
-  const bridgeUp = await bridge.start();
+  let bridgeUp = false;
   try {
     // Las tools MCP entran al MISMO registro que las builtin y las skills; un
     // servidor caido se dice y se omite, y los no locales quedan sujetos al
     // contrato confidencial (en confidencial ni se conectan; ademas el cerebro
     // no los ensena y su run() se niega).
+    //
+    // ANTES de abrir el puente a proposito: si el puerto ya escuchara mientras
+    // este await espera a un servidor MCP lento, una UI en marcha se
+    // autenticaria contra un motor sin manejadores instalados — recibiria el
+    // ready, reenviaria sus pendientes a nadie y se perderia el saludo con el
+    // estado autoritativo del micro. Entre start() y los registros de abajo
+    // no queda ningun await.
     for (const provider of await connectMcpProviders(config.mcp.servers, log, { confidential })) {
       mcpProviders.push(provider);
       registerMcpTools(provider);
     }
+
+    bridgeUp = await bridge.start();
 
     // Copia, no el mismo objeto: si la sesion y el runtime compartieran
     // captureOptions, mutar el device aqui haria que setAudioDevice lo viera "ya
@@ -416,15 +425,19 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
       }
       const conectados = new Set(mcpProviders.map((p) => p.id));
       for (const server of mcpConfigs) {
+        // La rancidez se comprueba ANTES de cada intento: una reconciliacion
+        // invalidada no puede lanzar ni un handshake mas (el handshake en si
+        // ya manda datos), asi que se abandona ENTERA, no solo su resultado.
+        if (generation !== mcpGeneration || confidential) return;
         if (!server.enabled || server.local || conectados.has(server.id)) continue;
         const provider = await connectMcpServer(server, log);
         if (!provider) continue;
-        // Reconciliacion rancia: mientras conectaba, el modo volvio a cambiar
-        // (o arranco otra reconciliacion). Se cierra sin registrar.
+        // ...y tras el await: si el modo cambio (o el runtime se paro)
+        // mientras conectaba, lo conectado se cierra sin registrar.
         if (generation !== mcpGeneration || confidential) {
           await provider.close().catch(() => {});
           log(`mcp "${server.id}" descartado: el modo cambio mientras conectaba`);
-          continue;
+          return;
         }
         mcpProviders.push(provider);
         registerMcpTools(provider);
@@ -549,6 +562,10 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
       stop: () => {
         session.stop();
         bridge.stop();
+        // Invalida cualquier reconciliacion EN VUELO: una conexion que
+        // complete tras el apagado se descarta y se cierra en su bucle, en
+        // vez de registrarse sobre un runtime ya parado.
+        mcpGeneration += 1;
         // Cerrar es cortesia (mata el proceso hijo de un stdio); un fallo aqui
         // no puede impedir el apagado.
         for (const provider of mcpProviders) {
