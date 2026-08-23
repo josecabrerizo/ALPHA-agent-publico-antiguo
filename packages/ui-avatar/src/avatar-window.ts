@@ -213,9 +213,28 @@ export class AvatarWindow {
     return this.settings;
   }
 
-  /** Recibe del motor la lista de microfonos disponibles. */
-  setMicDevices(inputs: { name: string; isDefault: boolean }[]): void {
+  /** Recibe del motor la lista de microfonos disponibles y cual esta activo. */
+  setMicDevices(inputs: { name: string; isDefault: boolean }[], current?: string): void {
     this.micDevices = inputs;
+    // El dispositivo activo lo dice el MOTOR: la cache se alinea sin reenviar
+    // (antes se descartaba y el menu podia marcar un micro que no era el real).
+    if (current !== undefined && current !== this.settings.audioDevice) {
+      this.settings = { ...this.settings, audioDevice: current };
+      saveSettings(this.settings);
+    }
+  }
+
+  /**
+   * Estado REAL del microfono segun el MOTOR (autoritativo): se refleja en la
+   * cache y el boton sin reenviarlo. La cache de esta UI puede venir de otro
+   * arranque, y un icono de silencio sobre una captura viva es una mentira de
+   * privacidad.
+   */
+  setMicEnabled(enabled: boolean): void {
+    if (this.settings.micEnabled === enabled) return;
+    this.settings = { ...this.settings, micEnabled: enabled };
+    saveSettings(this.settings);
+    this.paintMicButton();
   }
 
   /**

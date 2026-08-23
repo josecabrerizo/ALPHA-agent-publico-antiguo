@@ -11,8 +11,10 @@
 #   confidential PRIVACIDAD: true = solo recursos locales (modelo y voz de la
 #                maquina).
 #   model        ref proveedor/modelo que pasa a usar el asistente
-#   image        ruta de la imagen, relativa a la raiz del repo (o absoluta).
-#                De su nombre de fichero sale el imageId que viaja a la UI.
+#   image        assets/avatars/<id>.png (o .svg). A la UI solo viaja el
+#                imageId (el nombre del fichero sin extension): ella resuelve
+#                el arte contra SU carpeta de assets, asi que una imagen fuera
+#                de esa convencion no se encontrara (se avisa al cargar).
 #   color        color RGB del orbe de identidad, [r, g, b] en 0..255
 #   voice        engine (edge = neuronal online | sapi = local Windows), voz y
 #                ajuste de ritmo. Un avatar confidencial DEBE usar sapi.
