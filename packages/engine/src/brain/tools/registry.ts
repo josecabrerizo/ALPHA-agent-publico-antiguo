@@ -18,6 +18,11 @@ export class ToolRegistry {
     return this;
   }
 
+  /** Quita una herramienta (p. ej. al cerrar su servidor MCP en caliente). */
+  unregister(name: string): void {
+    this.tools.delete(name);
+  }
+
   list(): Tool[] {
     return [...this.tools.values()];
   }

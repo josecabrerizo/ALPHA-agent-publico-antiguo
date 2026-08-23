@@ -22,7 +22,12 @@ import {
   type AvatarProfilePatch,
 } from '../config/avatars.js';
 import { saveLiveSettings } from '../config/settings-store.js';
-import { connectMcpProviders } from '../brain/mcp/provider.js';
+import {
+  connectMcpProviders,
+  connectMcpServer,
+  type McpToolProvider,
+} from '../brain/mcp/provider.js';
+import { parseMcpServers } from '../brain/mcp/types.js';
 import { isGreeting } from '../conversation/greeting.js';
 import { ConversationSession, type ConversationState } from '../conversation/session.js';
 import type { AlphaConfig } from '../config/schema.js';
@@ -110,19 +115,21 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
   await skills.load();
   const tools = new ToolRegistry().registerAll(BUILTIN_TOOLS).registerAll(skills.tools());
 
-  // Servidores MCP declarados en la config: sus tools entran al MISMO registro
-  // que las builtin y las skills. Un servidor caido se dice y se omite; los no
-  // locales quedan sujetos al contrato confidencial (dos capas: el cerebro no
-  // los ensena y su run() se niega).
-  const mcpProviders = await connectMcpProviders(config.mcp.servers, log, { confidential });
-  for (const provider of mcpProviders) {
+  // Servidores MCP declarados en la config. Se CONECTAN mas abajo, dentro del
+  // ambito de limpieza del arranque: si algo falla despues de conectarlos hay
+  // que poder cerrarlos, o un hijo stdio sin dueno sobrevive al arranque
+  // fallido. Los configs parseados se guardan para la reconciliacion en
+  // caliente al entrar/salir del modo confidencial.
+  const mcpConfigs = parseMcpServers(config.mcp.servers).servers;
+  const mcpProviders: McpToolProvider[] = [];
+  const registerMcpTools = (provider: McpToolProvider): void => {
     for (const tool of provider.tools()) {
       // register() sobrescribe en silencio; una colision entre servidores (o
       // con una builtin) merece decirse antes de pisar.
       if (tools.has(tool.name)) log(`✗ [mcp] herramienta duplicada "${tool.name}": se sobrescribe`);
       tools.register(tool);
     }
-  }
+  };
 
   // Toman los valores por parametro (no del cierre) para poder construir y
   // validar candidatos ANTES de comprometer el estado — reconfiguracion
@@ -170,6 +177,15 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
   const bridge = new AvatarBridge(bridgePort);
   const bridgeUp = await bridge.start();
   try {
+    // Las tools MCP entran al MISMO registro que las builtin y las skills; un
+    // servidor caido se dice y se omite, y los no locales quedan sujetos al
+    // contrato confidencial (en confidencial ni se conectan; ademas el cerebro
+    // no los ensena y su run() se niega).
+    for (const provider of await connectMcpProviders(config.mcp.servers, log, { confidential })) {
+      mcpProviders.push(provider);
+      registerMcpTools(provider);
+    }
+
     // Copia, no el mismo objeto: si la sesion y el runtime compartieran
     // captureOptions, mutar el device aqui haria que setAudioDevice lo viera "ya
     // aplicado" y no reiniciara la captura. currentMic lleva aparte cual es el activo.
@@ -361,6 +377,34 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
       persist({ agent: nextAvatar.id });
     }
 
+    /**
+     * El contrato confidencial aplicado a las CONEXIONES MCP, no solo a sus
+     * tools: al entrar en confidencial se cierran y des-registran los
+     * servidores no locales (un hijo stdio o una sesion http vivos pueden
+     * seguir saliendo a la red aunque sus tools esten bloqueadas); al salir,
+     * se reconectan y re-registran.
+     */
+    async function reconcileMcpProviders(nowConfidential: boolean): Promise<void> {
+      if (nowConfidential) {
+        for (const provider of [...mcpProviders]) {
+          if (provider.local) continue;
+          for (const tool of provider.tools()) tools.unregister(tool.name);
+          mcpProviders.splice(mcpProviders.indexOf(provider), 1);
+          await provider.close().catch(() => {});
+          log(`mcp "${provider.id}" cerrado: modo confidencial`);
+        }
+        return;
+      }
+      const conectados = new Set(mcpProviders.map((p) => p.id));
+      for (const server of mcpConfigs) {
+        if (!server.enabled || server.local || conectados.has(server.id)) continue;
+        const provider = await connectMcpServer(server, log);
+        if (!provider) continue;
+        mcpProviders.push(provider);
+        registerMcpTools(provider);
+      }
+    }
+
     /** Valida y activa un perfil completo: sus tres opciones viajan juntas. */
     function activateAvatar(nextAvatar: AvatarProfile): void {
       const nextConfidential = confidentialForced || nextAvatar.confidential;
@@ -370,12 +414,18 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
       const nextSpeaker = makeSpeaker(nextConfidential, nextAvatar);
       const voiceInfo = nextSpeaker.describe();
 
+      const wasConfidential = confidential;
       brain = nextBrain;
       speaker = nextSpeaker;
       model = nextModel;
       confidential = nextConfidential;
       avatar = nextAvatar;
       session.reconfigure({ brain, speaker });
+      if (confidential !== wasConfidential) {
+        reconcileMcpProviders(confidential).catch((err: unknown) =>
+          log(`✗ [mcp] reconciliando: ${(err as Error).message}`),
+        );
+      }
       sendAvatars();
       log(
         `⚙️  ${nextAvatar.name} · ${info.provider}/${info.model} · voz ${voiceInfo.voice}${confidential ? ' · confidencial' : ''}`,
@@ -481,9 +531,13 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
       },
     };
   } catch (err) {
-    // Un fallo posterior del arranque no puede dejar el puente vivo: quedaria
-    // el socket escuchando y el token en disco sin nadie que los pare.
+    // Un fallo posterior del arranque no puede dejar NADA vivo: ni el puente
+    // (socket escuchando, token en disco) ni los servidores MCP ya conectados
+    // (un hijo stdio sin dueno seguiria corriendo para siempre).
     bridge.stop();
+    for (const provider of mcpProviders) {
+      provider.close().catch(() => {});
+    }
     throw err;
   }
 }
