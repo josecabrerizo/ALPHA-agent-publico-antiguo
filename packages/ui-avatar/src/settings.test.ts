@@ -9,6 +9,8 @@ import {
   saveSettings,
   loadPendiente,
   savePendiente,
+  loadPendientesPerfil,
+  savePendientesPerfil,
   DEFAULT_SETTINGS,
 } from './settings.js';
 import { AGENT_ORDER } from './agents.js';
@@ -77,6 +79,20 @@ test('el parche pendiente sobrevive a guardar ajustes y a un reinicio', () => {
   assert.equal(loadSettings().agent, 'nexus', 'y el parche no pisa los ajustes');
   savePendiente(undefined);
   assert.deepEqual(loadPendiente(), {}, 'entregado el parche, se limpia');
+});
+
+test('la cola de perfiles pendientes sobrevive al reinicio y se limpia', () => {
+  process.env['ALPHA_HOME'] = mkdtempSync(path.join(os.tmpdir(), 'alpha-ui-settings-'));
+  savePendientesPerfil([
+    { type: 'avatar-config', avatarId: 'vulpis', settings: { confidential: true } },
+  ]);
+  // Guardar los ajustes de presentacion no puede llevarse la cola por delante.
+  saveSettings({ agent: 'nexus', audioDevice: '', micEnabled: true });
+  assert.deepEqual(loadPendientesPerfil(), [
+    { type: 'avatar-config', avatarId: 'vulpis', settings: { confidential: true } },
+  ]);
+  savePendientesPerfil(undefined);
+  assert.deepEqual(loadPendientesPerfil(), []);
 });
 
 test('un parche corrupto en disco se descarta campo a campo', () => {

@@ -222,9 +222,10 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
         onLevel: (level, speaking) => cb.onLevel?.(level, speaking),
         onLog: (m) => log(`   ${m}`),
         onMicChange: (enabled) => {
-          // El estado REAL del micro viaja siempre: la UI lo refleja sin
-          // fiarse de su cache de presentacion.
-          bridge.broadcast({ type: 'mic', enabled });
+          // El mic AUTORITATIVO no se emite aqui sino tras persistir (ver
+          // applyConfig): para la UI, confirmado = aplicado Y guardado — si
+          // solo se aplicara, un fallo de disco le haria soltar su pendiente
+          // y el siguiente arranque capturaria con el ajuste viejo.
           // Con el micro cerrado no esta "escuchando": el avatar pasa a reposo.
           if (!enabled) bridge.broadcast({ type: 'state', state: 'reposo' });
           cb.onMicChange?.(enabled);
@@ -372,18 +373,31 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
       const s = msg.settings;
 
       // Silenciar el microfono: independiente del resto: sigue valiendo el chat
-      // escrito y no toca modelo, voz ni avatar.
+      // escrito y no toca modelo, voz ni avatar. El mic autoritativo solo
+      // viaja si ADEMAS quedo persistido: es lo que le dice a la UI que puede
+      // soltar su parche pendiente, y un mute aplicado pero no guardado se
+      // perderia en el siguiente arranque.
       if (typeof s.micEnabled === 'boolean' && s.micEnabled !== session.isMicEnabled()) {
         session.setMicEnabled(s.micEnabled);
-        persist({ micEnabled: s.micEnabled });
+        if (saveLiveSettings({ micEnabled: s.micEnabled })) {
+          bridge.broadcast({ type: 'mic', enabled: s.micEnabled });
+        } else {
+          log(`no se pudo guardar alpha.settings.json; el mute queda sin confirmar`);
+        }
       }
 
       // Microfono: reinicia la captura con el nuevo dispositivo. Se deja que
-      // setAudioDevice sea quien actualiza el estado de la sesion.
+      // setAudioDevice sea quien actualiza el estado de la sesion. La difusion
+      // de devices con el current nuevo es la CONFIRMACION para la UI, y solo
+      // viaja con la persistencia hecha (mismo contrato que el mic).
       if (typeof s.audioDevice === 'string' && s.audioDevice && s.audioDevice !== currentMic) {
         currentMic = s.audioDevice;
         session.setAudioDevice(s.audioDevice);
-        persist({ audioDevice: s.audioDevice });
+        if (saveLiveSettings({ audioDevice: s.audioDevice })) {
+          void sendDevices();
+        } else {
+          log(`no se pudo guardar alpha.settings.json; el microfono queda sin confirmar`);
+        }
         log(`⚙️  microfono desde el avatar: ${s.audioDevice}`);
       }
 
