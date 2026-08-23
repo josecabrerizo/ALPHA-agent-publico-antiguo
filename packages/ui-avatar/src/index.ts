@@ -7,6 +7,7 @@
  */
 import { AvatarWindow } from './avatar-window.js';
 import { connectBridge, type AvatarConfigMessage, type ConfigMessage } from '@alpha/protocol';
+import { loadPendiente, savePendiente } from './settings.js';
 import { log } from './log.js';
 
 const avatar = new AvatarWindow();
@@ -17,8 +18,9 @@ avatar.show();
 
 // Cambios hechos SIN motor: se acumulan y se reenvian al autenticar. El caso
 // que importa es el mute pre-arranque — es una promesa de privacidad y no
-// puede perderse en silencio (la cache de ~/.alpha es solo presentacion).
-let pendiente: ConfigMessage['settings'] = {};
+// puede perderse en silencio, NI SIQUIERA reiniciando la UI antes de conectar:
+// por eso el parche se persiste junto a la cache y se recupera al arrancar.
+let pendiente: ConfigMessage['settings'] = loadPendiente();
 // Los cambios de PERFIL (modelo, voz, confidencial de un avatar) tambien: el
 // menu sigue operativo con los catalogos cacheados durante un reinicio del
 // motor, y "activar confidencial" descartado en silencio dejaria al perfil
@@ -35,10 +37,13 @@ const bridge = connectBridge((msg) => {
     // acaba alineada con la verdad aunque algo del parche se rechace.
     if (Object.keys(pendiente).length > 0) {
       const parche = pendiente;
-      pendiente = {};
       if (bridge.send({ type: 'config', settings: parche })) {
+        pendiente = {};
+        savePendiente(undefined);
         log(`config pendiente → motor: ${JSON.stringify(parche)}`);
       }
+      // Si el socket murio entre el ready y el envio, el parche se conserva
+      // (en memoria y en disco) para el siguiente intento.
     }
     for (const mensaje of pendientesPerfil.splice(0)) {
       if (bridge.send(mensaje)) {
@@ -98,6 +103,7 @@ avatar.setOnSettingsChanged((patch) => {
     log(`config → motor: ${JSON.stringify(patch)}`);
   } else {
     pendiente = { ...pendiente, ...patch };
+    savePendiente(pendiente);
     log(`config pendiente (sin motor): ${JSON.stringify(patch)}`);
   }
 });

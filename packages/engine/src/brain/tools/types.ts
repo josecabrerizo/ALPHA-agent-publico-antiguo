@@ -9,6 +9,9 @@ export interface JsonSchema {
   type: 'object';
   properties: Record<string, unknown>;
   required?: string[];
+  /** El resto del esquema ($defs, additionalProperties...) viaja tal cual:
+   *  recortarlo deja $refs colgando y el proveedor rechaza la peticion. */
+  [key: string]: unknown;
 }
 
 export interface ToolContext {

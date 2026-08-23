@@ -171,9 +171,9 @@ export class Brain {
         {
           model,
           messages: messages as never,
-          // El JSON Schema propio no encaja con el tipo del SDK (index signature);
-          // se castea, igual que messages.
-          ...(tools && tools.length > 0 ? { tools: tools as never } : {}),
+          // JsonSchema lleva index signature, asi que encaja con el tipo del
+          // SDK sin castear (messages si sigue casteado, ver arriba).
+          ...(tools && tools.length > 0 ? { tools } : {}),
           max_tokens: this.maxTokens,
           temperature: this.temperature,
           reasoning_effort: this.reasoningEffort,

@@ -208,18 +208,20 @@ function namespacedName(serverId: string, toolName: string): string {
 }
 
 /**
- * El inputSchema de MCP ya es JSON Schema de un objeto; se estrecha a la forma
- * que espera el formato OpenAI. Uno raro (sin type object) se envuelve vacio:
- * mejor una tool sin parametros que un arranque caido.
+ * El inputSchema de MCP ya es JSON Schema de un objeto y viaja ENTERO:
+ * reconstruirlo a mano descartaba los $defs/definitions y dejaba colgando
+ * cualquier $ref de properties, y un esquema invalido puede tumbar la
+ * peticion completa al proveedor. Uno raro (sin type object) se envuelve
+ * vacio: mejor una tool sin parametros que un arranque caido.
  */
 function adaptSchema(inputSchema: unknown): JsonSchema {
   if (inputSchema && typeof inputSchema === 'object') {
     const s = inputSchema as Record<string, unknown>;
     if (s['type'] === 'object') {
       return {
+        ...s,
         type: 'object',
         properties: (s['properties'] as Record<string, unknown>) ?? {},
-        ...(Array.isArray(s['required']) ? { required: s['required'] as string[] } : {}),
       };
     }
   }
@@ -239,10 +241,17 @@ function flattenContent(content: unknown): string {
     else if (c['type'] === 'image') parts.push('[imagen]');
     else if (c['type'] === 'audio') parts.push('[audio]');
     else if (c['type'] === 'resource' || c['type'] === 'resource_link') {
-      const uri =
-        (c['uri'] as string | undefined) ??
-        ((c['resource'] as Record<string, unknown> | undefined)?.['uri'] as string | undefined);
-      parts.push(uri ? `[recurso: ${uri}]` : '[recurso]');
+      // Un recurso embebido con texto ES el resultado (asi devuelven su
+      // contenido las tools de leer ficheros/documentos): se entrega el
+      // texto. La marca con la uri queda solo para lo no textual.
+      const resource = c['resource'] as Record<string, unknown> | undefined;
+      const text = resource?.['text'];
+      if (typeof text === 'string' && text) {
+        parts.push(text);
+      } else {
+        const uri = (c['uri'] as string | undefined) ?? (resource?.['uri'] as string | undefined);
+        parts.push(uri ? `[recurso: ${uri}]` : '[recurso]');
+      }
     }
   }
   return parts.join('\n').trim() || '(sin resultado)';
