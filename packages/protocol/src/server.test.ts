@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { AvatarBridge } from './server.js';
 import { bridgeTokenPathFor } from './constants.js';
+import { PROTOCOL_VERSION } from './messages.js';
 
 // Los tests no escriben el token en el ~/.alpha real del usuario: se apunta
 // ALPHA_HOME a un temporal ANTES de calcular la ruta (se lee en cada llamada).
@@ -81,6 +82,46 @@ test('el acuse ready anuncia la version del protocolo', async () => {
     const ready = JSON.parse(lineas.join('').split('\n')[0] ?? '{}') as Record<string, unknown>;
     assert.equal(ready['type'], 'ready');
     assert.equal(typeof ready['version'], 'number', 'sin version, un desajuste seria mudo');
+  });
+});
+
+/** Captura los console.warn emitidos durante fn. */
+async function conAvisos(fn: () => Promise<void>): Promise<string[]> {
+  const avisos: string[] = [];
+  const original = console.warn;
+  console.warn = (...args: unknown[]) => avisos.push(args.join(' '));
+  try {
+    await fn();
+  } finally {
+    console.warn = original;
+  }
+  return avisos;
+}
+
+test('un auth sin version (avatar viejo) se avisa tambien en el servidor', async () => {
+  await withBridge(async (_bridge, token) => {
+    const avisos = await conAvisos(async () => {
+      const c = client();
+      await new Promise((r) => c.on('connect', r));
+      c.write(JSON.stringify({ type: 'auth', token }) + '\n');
+      await tick();
+      c.destroy();
+    });
+    assert.equal(avisos.length, 1, 'el warn del cliente solo cubre el despliegue inverso');
+    assert.match(avisos[0]!, /sin version/);
+  });
+});
+
+test('un auth con la version correcta no genera avisos', async () => {
+  await withBridge(async (_bridge, token) => {
+    const avisos = await conAvisos(async () => {
+      const c = client();
+      await new Promise((r) => c.on('connect', r));
+      c.write(JSON.stringify({ type: 'auth', token, version: PROTOCOL_VERSION }) + '\n');
+      await tick();
+      c.destroy();
+    });
+    assert.deepEqual(avisos, []);
   });
 });
 
