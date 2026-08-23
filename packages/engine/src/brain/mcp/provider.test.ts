@@ -202,6 +202,33 @@ test('tools/list paginado: se siguen los nextCursor hasta agotar', async () => {
   }
 });
 
+test('una paginacion rota (cursor repetido) no cuelga el arranque', async () => {
+  const server = new Server({ name: 'roto', version: '1.0.0' }, { capabilities: { tools: {} } });
+  server.setRequestHandler(ListToolsRequestSchema, () => ({
+    // Siempre el mismo cursor: cada peticion individual cumple su timeout,
+    // asi que sin el tope propio el bucle correria para siempre.
+    tools: [{ name: 'eterna', description: 'x', inputSchema: { type: 'object' as const } }],
+    nextCursor: 'siempre-la-misma',
+  }));
+  server.setRequestHandler(CallToolRequestSchema, () => ({
+    content: [{ type: 'text', text: 'x' }],
+  }));
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  let cerrado = false;
+  const originalClose = clientTransport.close.bind(clientTransport);
+  clientTransport.close = async () => {
+    cerrado = true;
+    await originalClose();
+  };
+  await assert.rejects(
+    () => McpToolProvider.connect(cfg(), { transport: clientTransport }),
+    /no avanza/,
+  );
+  assert.equal(cerrado, true, 'el fallo de paginacion tambien cierra el transporte');
+  await server.close();
+});
+
 test('un esquema con $defs y $ref viaja entero, no reconstruido', async () => {
   // Servidor de bajo nivel para controlar el JSON Schema crudo: el registro
   // de alto nivel lo generaria desde zod y no tendria $defs.

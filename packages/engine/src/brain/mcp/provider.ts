@@ -21,6 +21,9 @@ const MAX_TOOL_NAME = 64;
 /** Un esquema kilometrico marea a los modelos chicos y no cabe en su contexto. */
 const MAX_DESCRIPTION = 1_000;
 
+/** Tope de paginas de tools/list: por encima, la paginacion esta rota. */
+const MAX_TOOL_PAGES = 100;
+
 export class McpToolProvider {
   private constructor(
     private readonly client: Client,
@@ -45,7 +48,11 @@ export class McpToolProvider {
 
       // tools/list puede venir paginado: sin seguir nextCursor, todo lo que no
       // cupiera en la primera pagina desapareceria del registro en silencio.
+      // Y ACOTADO: un servidor con la paginacion rota (cursor repetido, o
+      // paginas sin fin) colgaria el arranque para siempre — cada peticion
+      // individual cumple su timeout, asi que el bucle necesita su propio tope.
       const discovered: Awaited<ReturnType<Client['listTools']>>['tools'] = [];
+      const cursores = new Set<string>();
       let cursor: string | undefined;
       do {
         const page = await withTimeout(
@@ -55,6 +62,14 @@ export class McpToolProvider {
         );
         discovered.push(...page.tools);
         cursor = page.nextCursor;
+        if (cursor !== undefined) {
+          if (cursores.has(cursor) || cursores.size >= MAX_TOOL_PAGES) {
+            throw new Error(
+              `la paginacion de tools de "${cfg.id}" no avanza (cursor repetido o mas de ${MAX_TOOL_PAGES} paginas)`,
+            );
+          }
+          cursores.add(cursor);
+        }
       } while (cursor);
 
       const tools: Tool[] = [];

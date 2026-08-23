@@ -45,6 +45,7 @@ export default tseslint.config(
           './packages/protocol/tsconfig.check.json',
           './packages/engine/tsconfig.check.json',
           './packages/ui-avatar/tsconfig.check.json',
+          './packages/avatar-mcp/tsconfig.check.json',
         ],
         tsconfigRootDir: import.meta.dirname,
       },

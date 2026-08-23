@@ -1,0 +1,21 @@
+{
+  "name": "@alpha/avatar-mcp",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Fachada MCP del avatar de A.L.P.H.A.: cualquier agente MCP puede usar la cara (y la voz) del avatar",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc --build",
+    "start": "tsx src/index.ts",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-exclude=\"src/**/*.test.ts\" \"src/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@alpha/engine": "0.0.1",
+    "@alpha/protocol": "0.0.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.4.3"
+  }
+}

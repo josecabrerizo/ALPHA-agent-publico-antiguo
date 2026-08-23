@@ -228,16 +228,17 @@ Monorepo con el cerebro separado de la cara por un contrato explícito:
 ```
 packages/
   protocol/    Contrato del puente motor↔avatar: mensajes, puerto, token,
-               framing y las dos puntas del socket. Lo importan los otros dos.
+               framing y las dos puntas del socket. Lo importan los demás.
   engine/      Motor headless. Sin UI. Todo el cerebro y la E/S.
     audio/     captura (ffmpeg) + VAD
     stt/       transcripción (whisper.cpp)
     spikes/    guiones ejecutables para validar cada capa por separado
-    brain/     cerebro compatible-OpenAI + herramientas + skills
+    brain/     cerebro compatible-OpenAI + herramientas + skills + cliente MCP
     conversation/  bucle escuchar→pensar→hablar
     tts/       voz (Edge online / SAPI local)
     config/    esquema unificado + carga por capas + perfiles de avatar
   ui-avatar/   App NodeGui: retrato flotante, menú de configuración y chat escrito
+  avatar-mcp/  Fachada MCP: cualquier agente externo puede usar la cara del avatar
 ```
 
 `@alpha/protocol` se compila a `dist/` (lo hace `npm install` solo, y también
@@ -264,6 +265,20 @@ perfiles de avatar y de la lista de micrófonos, y los envía al conectar. Si
 rechaza un cambio —un avatar de nube con el modo confidencial puesto— responde
 con el que de verdad quedó activo, y la UI se alinea con él en vez de mentir
 sobre lo que está corriendo.
+
+Y como al avatar le da igual quién haya detrás del puente, `avatar-mcp` explota
+esa costura: es un servidor MCP por stdio que se hace pasar por el motor y da
+la cara (y la voz local) a cualquier agente externo. Con el motor apagado:
+
+```
+npm run avatar                      # la cara, reintentando conexión
+claude mcp add alpha-avatar -- npx -y tsx <ruta-al-repo>/packages/avatar-mcp/src/index.ts
+```
+
+y Claude Code puede `decir`, `saludar`, cambiar de `estado` o de avatar, y
+`leer_mensajes` del chat. Motor y fachada en el mismo puerto se excluyen a
+propósito (sobre la cara solo manda una voz); para tener ambos,
+`ALPHA_BRIDGE_PORT=43118` en fachada y avatar.
 
 ### Por qué procesos externos y (casi) ningún módulo nativo
 
