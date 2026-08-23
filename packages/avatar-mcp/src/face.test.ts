@@ -83,7 +83,12 @@ async function conectarCliente(): Promise<FakeClient> {
 }
 
 async function withFace(
-  opts: { profiles?: AvatarProfile[]; activeId?: string; speaker?: Speaker },
+  opts: {
+    profiles?: AvatarProfile[];
+    activeId?: string;
+    speaker?: Speaker;
+    speakerFor?: (p: AvatarProfile) => Speaker | undefined;
+  },
   fn: (face: FaceController, cliente: FakeClient) => Promise<void>,
 ): Promise<void> {
   const bridge = new AvatarBridge(TEST_PORT);
@@ -92,7 +97,7 @@ async function withFace(
     bridge,
     opts.profiles ?? [perfil('vulpis', 'Vulpis.AI'), perfil('nexus', 'Nexus')],
     opts.activeId,
-    opts.speaker,
+    opts.speakerFor ?? (opts.speaker ? () => opts.speaker : undefined),
   );
   const cliente = await conectarCliente();
   try {
@@ -189,6 +194,24 @@ test('dos decir concurrentes no se solapan: la cola serializa el habla', async (
       // El primer reposo es el del saludo de presentacion.
       ['reposo', 'hablando', 'reposo', 'hablando', 'reposo'],
       'sin cola, el primero en terminar mandaba reposo con el otro aun hablando',
+    );
+  });
+});
+
+test('cambiar de avatar recrea la voz: la del PERFIL nuevo, no la del viejo', async () => {
+  const porPerfil = new Map<string, FakeSpeaker>([
+    ['vulpis', new FakeSpeaker()],
+    ['nexus', new FakeSpeaker()],
+  ]);
+  await withFace({ speakerFor: (p) => porPerfil.get(p.id) }, async (face) => {
+    await face.decir('uno');
+    face.cambiarAvatar('nexus');
+    await face.decir('dos');
+    assert.deepEqual(porPerfil.get('vulpis')!.spoken, ['uno']);
+    assert.deepEqual(
+      porPerfil.get('nexus')!.spoken,
+      ['dos'],
+      'Nexus no puede hablar con la voz (ni el ritmo) de Unit-A',
     );
   });
 });

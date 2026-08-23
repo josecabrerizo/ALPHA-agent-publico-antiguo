@@ -43,15 +43,18 @@ export class FaceController {
   private readonly profiles: AvatarProfile[];
   private active: AvatarProfile;
   private inbox: FaceMessage[] = [];
+  /** La voz del avatar ACTIVO: se recrea al cambiar de perfil (la fabrica). */
+  private speaker: Speaker | undefined;
 
   constructor(
     private readonly bridge: AvatarBridge,
     profiles: AvatarProfile[],
     activeId?: string,
-    private readonly speaker?: Speaker,
+    private readonly speakerFor?: (profile: AvatarProfile) => Speaker | undefined,
   ) {
     this.profiles = profiles.length > 0 ? profiles : [fallbackProfile()];
     this.active = this.profiles.find((p) => p.id === activeId) ?? this.profiles[0]!;
+    this.speaker = speakerFor?.(this.active);
     // Lo que el usuario teclee en el chat del avatar se guarda para que el
     // agente externo lo recoja cuando quiera (tool leer_mensajes).
     bridge.onTextInput((texto) => this.inbox.push({ texto, ts: Date.now() }));
@@ -200,6 +203,10 @@ export class FaceController {
       );
     }
     this.active = next;
+    // La voz pertenece al PERFIL: se recrea con la del nuevo (si no, Nexus
+    // seguiria hablando con la voz y el ritmo de Unit-A). La cola de habla no
+    // se corta; lo que quede en ella sale ya con la voz nueva.
+    if (this.speakerFor) this.speaker = this.speakerFor(next);
     this.sendAvatars();
     return next;
   }
@@ -209,6 +216,11 @@ export class FaceController {
     const out = this.inbox;
     this.inbox = [];
     return out;
+  }
+
+  /** Corta la voz en curso (apagado de la fachada). */
+  detener(): void {
+    this.speaker?.stop();
   }
 
   get activo(): AvatarProfile {

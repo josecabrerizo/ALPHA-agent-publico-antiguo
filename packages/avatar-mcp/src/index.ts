@@ -40,35 +40,39 @@ const profiles = loadAvatars();
 // Voz de la fachada. 'sapi' por defecto: lo que diga un agente externo no
 // debe salir a la nube salvo peticion explicita (ALPHA_MCP_TTS=edge).
 const ttsMode = process.env['ALPHA_MCP_TTS'] ?? 'sapi';
-let speaker: Speaker | undefined;
-if (ttsMode === 'sapi' || ttsMode === 'edge') {
-  const activeId = process.env['ALPHA_MCP_AVATAR'];
-  const active = profiles.find((p) => p.id === activeId) ?? profiles[0];
-  try {
-    speaker = createSpeaker({
-      engine: ttsMode,
-      confidential: ttsMode === 'sapi',
-      // La voz del perfil solo vale si es del motor elegido.
-      ...(active && active.voice.engine === ttsMode
-        ? { [ttsMode === 'sapi' ? 'sapiVoice' : 'edgeVoice']: active.voice.name }
-        : {}),
-      ...(active ? { rate: active.voice.rate } : {}),
-    });
-  } catch (err) {
-    log(`sin voz (${(err as Error).message}); la cara funciona muda`);
-  }
-} else if (ttsMode !== 'off') {
+if (ttsMode !== 'sapi' && ttsMode !== 'edge' && ttsMode !== 'off') {
   log(`ALPHA_MCP_TTS="${ttsMode}" no es sapi | edge | off; la cara funciona muda`);
 }
 
-const face = new FaceController(bridge, profiles, process.env['ALPHA_MCP_AVATAR'], speaker);
+// La voz pertenece al PERFIL: esta fabrica crea el speaker del avatar activo
+// y cambiar_avatar la vuelve a invocar con el nuevo — sin esto, Nexus seguia
+// hablando con la voz (y el ritmo) de Unit-A tras el cambio.
+const speakerFor = (active: AvatarProfile): Speaker | undefined => {
+  if (ttsMode !== 'sapi' && ttsMode !== 'edge') return undefined;
+  try {
+    return createSpeaker({
+      engine: ttsMode,
+      confidential: ttsMode === 'sapi',
+      // La voz del perfil solo vale si es del motor elegido (y tiene nombre).
+      ...(active.voice.engine === ttsMode && active.voice.name
+        ? { [ttsMode === 'sapi' ? 'sapiVoice' : 'edgeVoice']: active.voice.name }
+        : {}),
+      rate: active.voice.rate,
+    });
+  } catch (err) {
+    log(`sin voz para "${active.id}" (${(err as Error).message}); la cara sigue muda`);
+    return undefined;
+  }
+};
+
+const face = new FaceController(bridge, profiles, process.env['ALPHA_MCP_AVATAR'], speakerFor);
 
 const server = new McpServer({ name: 'alpha-avatar', version: '0.0.1' });
 registerFaceTools(server, face);
 await server.connect(new StdioServerTransport());
 
 log(
-  `listo: puente en 127.0.0.1:${port}, ${face.avatares().length} avatares (activo: ${face.activo.id}), voz ${speaker ? ttsMode : 'apagada'}`,
+  `listo: puente en 127.0.0.1:${port}, ${face.avatares().length} avatares (activo: ${face.activo.id}), voz ${ttsMode === 'off' ? 'apagada' : ttsMode}`,
 );
 log(`lanza la cara con "npm run avatar" si no esta ya abierta`);
 
@@ -78,7 +82,7 @@ log(`lanza la cara con "npm run avatar" si no esta ya abierta`);
 // borra su token.
 const apagar = (): never => {
   try {
-    speaker?.stop();
+    face.detener();
   } catch {
     // cortar la voz es cortesia; no puede impedir el apagado
   }
