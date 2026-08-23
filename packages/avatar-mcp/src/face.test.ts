@@ -187,6 +187,43 @@ test('lo escrito en el chat del avatar se recoge una sola vez', async () => {
   });
 });
 
+test('la UI conectada puede cambiar de avatar a traves de la fachada', async () => {
+  await withFace({}, async (face, cliente) => {
+    cliente.enviar({ type: 'config', settings: { agent: 'nexus' } });
+    await tick();
+    assert.equal(face.activo.id, 'nexus', 'la fachada tiene que atender el cambio, no ignorarlo');
+    const ultimo = cliente.mensajes.at(-1);
+    assert.equal(ultimo?.type === 'avatars' && ultimo.current, 'nexus');
+  });
+});
+
+test('agente desconocido o ajustes de audio: config-error, no silencio', async () => {
+  await withFace({}, async (face, cliente) => {
+    cliente.enviar({ type: 'config', settings: { agent: 'clippy' } });
+    await tick();
+    assert.equal(face.activo.id, 'vulpis');
+    assert.equal(cliente.mensajes.filter((m) => m.type === 'config-error').length, 1);
+    cliente.enviar({ type: 'config', settings: { micEnabled: false } });
+    await tick();
+    // La UI esta autenticada y su send() devuelve true: sin esta respuesta se
+    // quedaria creyendo aplicado un ajuste que nadie gestiona aqui.
+    assert.equal(cliente.mensajes.filter((m) => m.type === 'config-error').length, 2);
+  });
+});
+
+test('editar un perfil desde la UI se rechaza y vuelve el estado autoritativo', async () => {
+  await withFace({}, async (_face, cliente) => {
+    cliente.enviar({ type: 'avatar-config', avatarId: 'vulpis', settings: { confidential: true } });
+    await tick();
+    const idx = cliente.mensajes.findIndex((m) => m.type === 'config-error');
+    assert.ok(idx >= 0, 'la UI tiene que saber que NO se aplico');
+    assert.ok(
+      cliente.mensajes.slice(idx).some((m) => m.type === 'avatars'),
+      'y recibir el estado real para deshacer su seleccion optimista',
+    );
+  });
+});
+
 test('sin perfiles que cargar, la cara sigue viva con un perfil minimo', async () => {
   await withFace({ profiles: [] }, async (face, cliente) => {
     assert.equal(face.activo.id, 'alpha');

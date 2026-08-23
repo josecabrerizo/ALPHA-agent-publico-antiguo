@@ -56,6 +56,36 @@ export class FaceController {
     // agente externo lo recoja cuando quiera (tool leer_mensajes).
     bridge.onTextInput((texto) => this.inbox.push({ texto, ts: Date.now() }));
     bridge.onClientConnect(() => this.presentar());
+    // La UI conectada a la fachada esta AUTENTICADA: sus send() devuelven true
+    // y no encolan nada, asi que ignorar config/avatar-config la dejaria
+    // creyendo aplicado lo que nadie gestiono. Cambiar de avatar SI es una
+    // capacidad de la cara y se atiende; el resto se rechaza con config-error
+    // (la UI ya lo pinta) y se reenvia el estado autoritativo.
+    bridge.onConfigMessage((msg) => {
+      const s = msg.settings;
+      if (s.agent && s.agent !== this.active.id) {
+        try {
+          this.cambiarAvatar(s.agent);
+        } catch (err) {
+          this.bridge.broadcast({ type: 'config-error', message: (err as Error).message });
+          this.sendAvatars();
+        }
+      }
+      if (s.micEnabled !== undefined || s.audioDevice !== undefined) {
+        this.bridge.broadcast({
+          type: 'config-error',
+          message:
+            'esta cara la conduce un agente externo; el microfono y el audio se gestionan con el motor real',
+        });
+      }
+    });
+    bridge.onAvatarConfigMessage(() => {
+      this.bridge.broadcast({
+        type: 'config-error',
+        message: 'los perfiles (modelo, voz, confidencial) se editan con el motor real conectado',
+      });
+      this.sendAvatars();
+    });
   }
 
   /**
