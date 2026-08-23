@@ -373,8 +373,15 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
         log(`✗ [config] ${message}`);
         // El eco de settings es el veredicto para la cola de la UI: sin el,
         // un parche irrecuperable (un agente desconocido, por ejemplo) se
-        // reintentaria en cada reconexion para siempre.
-        bridge.broadcast({ type: 'config-error', message, settings: msg.settings });
+        // reintentaria en cada reconexion para siempre. SOLO el campo que
+        // pudo fallar: el unico camino que lanza aqui es el del agente (micro
+        // y dispositivo avisan y siguen); ecoar el parche entero se llevaria
+        // del pendiente campos aplicados pero aun sin confirmacion durable.
+        bridge.broadcast({
+          type: 'config-error',
+          message,
+          ...(msg.settings.agent !== undefined ? { settings: { agent: msg.settings.agent } } : {}),
+        });
         sendAvatars();
       });
     });
