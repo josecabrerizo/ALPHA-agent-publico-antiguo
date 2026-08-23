@@ -1,6 +1,7 @@
 import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { isMap, isSeq, parse as parseYaml, parseDocument } from 'yaml';
+import { DEFAULT_ORB_COLOR, type OrbColor } from '@alpha/protocol';
 import { repoRoot } from '../paths.js';
 import { DEFAULT_CONFIG } from './schema.js';
 
@@ -28,8 +29,14 @@ export interface AvatarProfile {
   /** Modo confidencial propio del avatar: solo modelo y voz locales. */
   confidential: boolean;
   model: string;
-  /** Ruta absoluta ya resuelta, para que la UI pueda cargarla directamente. */
-  image: string;
+  /**
+   * Identificador del juego de arte (basename del campo image, sin extension).
+   * El motor no manda rutas: el arte es de la presentacion y cada UI lo
+   * resuelve contra su propia carpeta de assets.
+   */
+  imageId: string;
+  /** Color de identidad del orbe. */
+  color: OrbColor;
   voice: AvatarVoice;
 }
 
@@ -112,10 +119,21 @@ function normalize(entry: unknown): AvatarProfile | undefined {
     personality: str(e['personality']) ?? '',
     confidential,
     model: str(e['model']) ?? DEFAULT_CONFIG.brain.model,
-    // Se resuelve a absoluta: la UI es otro proceso y no comparte cwd.
-    image: image ? path.resolve(repoRoot, image) : '',
+    // Del nombre del fichero sale el id del juego de arte; sin imagen, el
+    // propio id del perfil (la UI ya busca assets/avatars/<id>.png de fallback).
+    imageId: image ? path.basename(image, path.extname(image)) : id,
+    color: parseColor(e['color']) ?? DEFAULT_ORB_COLOR,
     voice,
   };
+}
+
+/** [r, g, b] en 0..255, o nada: un color a medias no puede colarse en la UI. */
+function parseColor(v: unknown): OrbColor | undefined {
+  if (!Array.isArray(v) || v.length !== 3) return undefined;
+  const ok = (c: unknown): c is number =>
+    typeof c === 'number' && Number.isFinite(c) && c >= 0 && c <= 255;
+  const [r, g, b] = v as unknown[];
+  return ok(r) && ok(g) && ok(b) ? [Math.round(r), Math.round(g), Math.round(b)] : undefined;
 }
 
 /**

@@ -4,6 +4,7 @@ import { existsSync, readdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { inflateSync } from 'node:zlib';
 import path from 'node:path';
+import { DEFAULT_ORB_COLOR } from '@alpha/protocol';
 import { parseAvatars, loadAvatars, patchAvatarsYaml } from './avatars.js';
 import { repoRoot } from '../paths.js';
 
@@ -142,7 +143,7 @@ test('YAML invalido o sin lista devuelve vacio en vez de lanzar', () => {
   assert.deepEqual(parseAvatars(''), []);
 });
 
-test('la imagen se resuelve a ruta absoluta (la UI es otro proceso)', () => {
+test('del campo image sale un imageId, no una ruta (el arte es de la UI)', () => {
   const [avatar] = parseAvatars(`
 avatars:
   - id: unit-a
@@ -150,8 +151,26 @@ avatars:
     image: assets/avatars/unit-a.png
 `);
   assert.ok(avatar);
-  assert.equal(path.isAbsolute(avatar.image), true);
-  assert.equal(avatar.image, path.resolve(repoRoot, 'assets/avatars/unit-a.png'));
+  assert.equal(avatar.imageId, 'unit-a');
+});
+
+test('sin campo image, el imageId es el propio id del perfil', () => {
+  const [avatar] = parseAvatars('avatars: [{ id: nexus, name: Nexus }]');
+  assert.equal(avatar?.imageId, 'nexus');
+});
+
+test('el color se lee del YAML y uno invalido o ausente cae al neutro', () => {
+  const [avatar] = parseAvatars(`
+avatars:
+  - id: x
+    name: X
+    color: [235, 150, 70]
+`);
+  assert.deepEqual(avatar?.color, [235, 150, 70]);
+  const [malo] = parseAvatars('avatars: [{ id: y, name: Y, color: [999, -1, azul] }]');
+  assert.deepEqual(malo?.color, DEFAULT_ORB_COLOR);
+  const [sin] = parseAvatars('avatars: [{ id: z, name: Z }]');
+  assert.deepEqual(sin?.color, DEFAULT_ORB_COLOR);
 });
 
 test('el avatars.yaml del repo trae los cuatro perfiles y respeta el contrato', () => {
@@ -162,7 +181,12 @@ test('el avatars.yaml del repo trae los cuatro perfiles y respeta el contrato', 
   );
   for (const a of avatars) {
     assert.ok(a.personality, `${a.id} necesita personalidad: es lo que lo hace un perfil`);
-    assert.ok(a.image, `${a.id} necesita imagen`);
+    assert.ok(a.imageId, `${a.id} necesita juego de arte`);
+    assert.notDeepEqual(
+      a.color,
+      DEFAULT_ORB_COLOR,
+      `${a.id} deberia declarar su color de identidad en avatars.yaml`,
+    );
     if (a.confidential)
       assert.equal(a.voice.engine, 'sapi', `${a.id} es confidencial y debe usar voz local`);
   }
@@ -202,8 +226,11 @@ test('rechaza modificar un avatar que no existe', () => {
  * el personaje desaparecido y sin mas rastro que una linea de log.
  */
 test('las imagenes de los avatares existen de verdad', () => {
+  const dir = path.join(repoRoot, 'assets', 'avatars');
   for (const a of loadAvatars()) {
-    assert.ok(existsSync(a.image), `${a.id}: no existe la imagen ${a.image}`);
+    const png = path.join(dir, `${a.imageId}.png`);
+    const svg = path.join(dir, `${a.imageId}.svg`);
+    assert.ok(existsSync(png) || existsSync(svg), `${a.id}: no existe la imagen ${png} (ni .svg)`);
   }
 });
 
@@ -223,7 +250,7 @@ test('las carpetas de poses se llaman igual que su avatar, con la misma caja', (
     .map((e) => e.name);
 
   for (const carpeta of enDisco) {
-    const ids = loadAvatars().map((a) => a.id);
+    const ids = loadAvatars().map((a) => a.imageId);
     assert.ok(
       ids.includes(carpeta),
       `la carpeta "${carpeta}" no corresponde a ningun avatar (¿caja distinta?); ids: ${ids.join(', ')}`,
@@ -246,7 +273,7 @@ test('las carpetas de poses se llaman igual que su avatar, con la misma caja', (
 test('ninguna pose toca el borde de su lienzo', async () => {
   const dir = path.join(repoRoot, 'assets', 'avatars');
   for (const a of loadAvatars()) {
-    const suyo = path.join(dir, a.id);
+    const suyo = path.join(dir, a.imageId);
     if (!existsSync(suyo)) continue;
     for (const f of readdirSync(suyo).filter((x) => x.endsWith('.png'))) {
       const { width, height, alphaAt } = await leerPng(path.join(suyo, f));
@@ -269,7 +296,7 @@ test('un avatar con poses las tiene TODAS', () => {
   const dir = path.join(repoRoot, 'assets', 'avatars');
   const poses = ['reposo', 'saludo', 'hablando', 'pensando'];
   for (const a of loadAvatars()) {
-    const suyo = path.join(dir, a.id);
+    const suyo = path.join(dir, a.imageId);
     if (!existsSync(suyo)) continue; // sin poses: retrato fijo, es valido
     const hay = readdirSync(suyo);
     for (const p of poses) {

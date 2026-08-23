@@ -23,10 +23,17 @@ import {
 } from '@nodegui/nodegui';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import type { AvatarConfigMessage, AvatarOption, ModelOption, VoiceOption } from '@alpha/protocol';
+import {
+  DEFAULT_ORB_COLOR,
+  type AvatarConfigMessage,
+  type AvatarOption,
+  type ModelOption,
+  type OrbColor,
+  type VoiceOption,
+} from '@alpha/protocol';
 import { log } from './log.js';
 import { STATE_CYCLE, STATE_RHYTHMS, MAX_PULSE, type AvatarState } from './states.js';
-import { AGENTS, AGENT_ORDER, type AgentId } from './agents.js';
+import { FALLBACK_AGENTS, AGENT_ORDER } from './agents.js';
 import { loadSettings, saveSettings, type Settings } from './settings.js';
 import { POSES, poseForState, posesDirFor, poseFile, breathAt, type Pose } from './poses.js';
 import { PoseAnimator } from './animator.js';
@@ -137,8 +144,8 @@ export class AvatarWindow {
   private dragDX = 0;
   private dragDY = 0;
 
-  /** Se llama al cambiar la config en el menu, para propagarla al motor. */
-  private onSettingsChanged: ((settings: Settings) => void) | undefined;
+  /** Se llama al cambiar la config en el menu, para propagar SOLO el cambio. */
+  private onSettingsChanged: ((patch: Partial<Settings>) => void) | undefined;
   /** Cambios de modelo, voz y privacidad, que pertenecen a un perfil. */
   private onAvatarSettingsChanged: ((message: AvatarConfigMessage) => void) | undefined;
 
@@ -188,7 +195,7 @@ export class AvatarWindow {
   }
 
   /** Registra quien recibe los cambios de config (para mandarlos al motor). */
-  setOnSettingsChanged(cb: (settings: Settings) => void): void {
+  setOnSettingsChanged(cb: (patch: Partial<Settings>) => void): void {
     this.onSettingsChanged = cb;
   }
 
@@ -219,8 +226,10 @@ export class AvatarWindow {
    */
   setAvatarOptions(list: AvatarOption[], current?: string): void {
     this.avatars = list;
-    if (current && current !== this.settings.agent && AGENT_ORDER.includes(current as AgentId)) {
-      this.settings = { ...this.settings, agent: current as AgentId };
+    // Sin filtro por catalogo local: el motor es el dueno de la lista, y un
+    // avatar que esta UI no conozca se pinta igual (color y arte por imageId).
+    if (current && current !== this.settings.agent) {
+      this.settings = { ...this.settings, agent: current };
       saveSettings(this.settings);
     }
     this.applyPortrait();
@@ -290,16 +299,20 @@ export class AvatarWindow {
   }
 
   /**
-   * Imagen del avatar. Manda la que da el motor (el perfil puede apuntar a
-   * cualquier fichero), pero antes de que conecte se usa la ruta convencional
-   * del repo para que el personaje se vea desde el primer segundo.
+   * Imagen del avatar. El motor manda un imageId (no una ruta): el arte es de
+   * la presentacion y se resuelve contra la carpeta de assets LOCAL, asi que
+   * motor y avatar pueden vivir en checkouts distintos. Antes de conectar se
+   * usa el propio id, que es la convencion de assets/avatars/<id>.png.
    */
   private imageFor(id: string): string {
-    const fromEngine = this.avatars.find((a) => a.id === id)?.image;
-    if (fromEngine) return fromEngine;
-    // dist/avatar-window.js -> repoRoot: tres niveles arriba (como el token).
+    const imageId = this.avatars.find((a) => a.id === id)?.imageId ?? id;
+    // dist/avatar-window.js -> repoRoot: tres niveles arriba. ALPHA_ASSETS_DIR
+    // la mueve (por ejemplo, si el avatar corre desde otro checkout).
+    const assetsDir =
+      process.env['ALPHA_ASSETS_DIR'] ??
+      path.resolve(__dirname, '..', '..', '..', 'assets', 'avatars');
     // Soporta PNG y SVG: intenta SVG primero, luego PNG como fallback.
-    const basePath = path.resolve(__dirname, '..', '..', '..', 'assets', 'avatars', id);
+    const basePath = path.join(assetsDir, imageId);
     const svgPath = `${basePath}.svg`;
     try {
       if (existsSync(svgPath)) return svgPath;
@@ -518,12 +531,25 @@ export class AvatarWindow {
   }
 
   /**
+   * Color de identidad del avatar activo: el que manda el motor, o el del
+   * catalogo de respaldo, o el neutro. Nunca revienta con un id desconocido
+   * (antes, un quinto avatar en avatars.yaml era un TypeError al elegirlo).
+   */
+  private activeColor(): OrbColor {
+    return (
+      this.avatars.find((a) => a.id === this.settings.agent)?.color ??
+      FALLBACK_AGENTS[this.settings.agent]?.color ??
+      DEFAULT_ORB_COLOR
+    );
+  }
+
+  /**
    * Estilo del orbe con el color del agente activo. Con retrato pasa a ser un
    * halo tenue detras del personaje; sin el, es la cara del asistente. El
    * ESTADO modula cuanto se enciende (ver stateGlow).
    */
   private paintOrb(): void {
-    const [r, g, b] = AGENTS[this.settings.agent].color;
+    const [r, g, b] = this.activeColor();
     const lighten = (c: number) => Math.min(255, c + 45);
     const darken = (c: number) => Math.round(c * 0.5);
     // Reposo no se apaga del todo (0.6) o el avatar pareceria desconectado.
@@ -592,7 +618,10 @@ export class AvatarWindow {
     // applyPortrait repinta tambien el orbe/halo, asi que cubre los dos casos.
     this.applyPortrait();
     this.paintMicButton();
-    this.onSettingsChanged?.(this.settings);
+    // SOLO el parche: reenviar la cache entera podia resucitar un micEnabled
+    // o un microfono rancios si el motor tenia otra cosa (la cache de esta UI
+    // es presentacion, no la verdad; la verdad la persiste el motor).
+    this.onSettingsChanged?.(patch);
   }
 
   private action(
@@ -620,7 +649,7 @@ export class AvatarWindow {
 
     const active = this.avatars.find((a) => a.id === this.settings.agent);
     const title = this.action(
-      `A.L.P.H.A. — ${active?.name ?? AGENTS[this.settings.agent].label}`,
+      `A.L.P.H.A. — ${active?.name ?? FALLBACK_AGENTS[this.settings.agent]?.label ?? this.settings.agent}`,
       () => {},
       {
         enabled: false,
@@ -640,7 +669,7 @@ export class AvatarWindow {
       );
       this.menuRefs.push(profileMenu);
       profileMenu.addAction(
-        this.action('Usar este avatar', () => this.update({ agent: profile.id as AgentId }), {
+        this.action('Usar este avatar', () => this.update({ agent: profile.id }), {
           checked: this.settings.agent === profile.id,
         }),
       );
@@ -718,15 +747,19 @@ export class AvatarWindow {
    */
   private avatarChoices(): AvatarOption[] {
     if (this.avatars.length > 0) return this.avatars;
-    return AGENT_ORDER.map((id) => ({
-      id,
-      name: AGENTS[id].label,
-      role: AGENTS[id].tagline,
-      model: '',
-      confidential: true,
-      voice: { engine: 'sapi', name: '', rate: 0 },
-      image: '',
-    }));
+    return AGENT_ORDER.map((id) => {
+      const agent = FALLBACK_AGENTS[id]!;
+      return {
+        id,
+        name: agent.label,
+        role: agent.tagline,
+        model: '',
+        confidential: true,
+        voice: { engine: 'sapi' as const, name: '', rate: 0 },
+        imageId: id,
+        color: agent.color,
+      };
+    });
   }
 
   private changeAvatar(avatarId: string, settings: AvatarConfigMessage['settings']): void {

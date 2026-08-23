@@ -1,22 +1,27 @@
+import type { OrbColor } from '@alpha/protocol';
+
 /**
- * Los cuatro agentes de A.L.P.H.A. Cada uno tiene identidad propia; mientras no
- * existan los sprites del personaje, esa identidad se expresa como color del
- * orbe. El estado (reposo/escuchando/...) es un eje aparte: da el ritmo de la
+ * Catalogo de RESPALDO para antes de conectar con el motor: los cuatro agentes
+ * fundadores, con nombre, rol y color, para que el menu y el orbe no arranquen
+ * vacios. La fuente de verdad son los perfiles que manda el motor (salen de
+ * config/avatars.yaml, con su color incluido): un avatar nuevo alli funciona
+ * de punta a punta sin tocar este fichero, que solo cubre el hueco hasta que
+ * llega el primer mensaje `avatars`.
+ *
+ * El estado (reposo/escuchando/...) es un eje aparte: da el ritmo de la
  * respiracion, no el color. Ver states.ts.
  */
-export type AgentId = 'vulpis' | 'unit-a' | 'nexus' | 'synapse';
-
 export interface Agent {
-  id: AgentId;
+  id: string;
   /** Nombre mostrado en el menu. */
   label: string;
   /** Una linea de personalidad, para el tooltip/menu. */
   tagline: string;
   /** Color de identidad del orbe (RGB). */
-  color: [number, number, number];
+  color: OrbColor;
 }
 
-export const AGENTS: Record<AgentId, Agent> = {
+export const FALLBACK_AGENTS: Record<string, Agent> = {
   vulpis: {
     id: 'vulpis',
     label: 'Vulpis.AI',
@@ -43,6 +48,6 @@ export const AGENTS: Record<AgentId, Agent> = {
   },
 };
 
-export const AGENT_ORDER: AgentId[] = ['vulpis', 'unit-a', 'nexus', 'synapse'];
+export const AGENT_ORDER: string[] = ['vulpis', 'unit-a', 'nexus', 'synapse'];
 
-export const DEFAULT_AGENT: AgentId = 'unit-a';
+export const DEFAULT_AGENT = 'unit-a';
