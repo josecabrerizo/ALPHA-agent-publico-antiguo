@@ -6,8 +6,18 @@
  * por linea); si el motor no esta, la ventana funciona sola y reintenta.
  */
 import { AvatarWindow } from './avatar-window.js';
-import { connectBridge, type AvatarConfigMessage, type ConfigMessage } from '@alpha/protocol';
-import { loadPendiente, savePendiente } from './settings.js';
+import {
+  connectBridge,
+  type AvatarConfigMessage,
+  type AvatarOption,
+  type ConfigMessage,
+} from '@alpha/protocol';
+import {
+  loadPendiente,
+  savePendiente,
+  loadPendientesPerfil,
+  savePendientesPerfil,
+} from './settings.js';
 import { log } from './log.js';
 
 const avatar = new AvatarWindow();
@@ -21,11 +31,53 @@ avatar.show();
 // puede perderse en silencio, NI SIQUIERA reiniciando la UI antes de conectar:
 // por eso el parche se persiste junto a la cache y se recupera al arrancar.
 let pendiente: ConfigMessage['settings'] = loadPendiente();
-// Los cambios de PERFIL (modelo, voz, confidencial de un avatar) tambien: el
-// menu sigue operativo con los catalogos cacheados durante un reinicio del
-// motor, y "activar confidencial" descartado en silencio dejaria al perfil
-// usando la nube creyendose local.
-const pendientesPerfil: AvatarConfigMessage[] = [];
+// Los cambios de PERFIL (modelo, voz, confidencial de un avatar) tambien, y
+// tambien persistidos: el menu sigue operativo con los catalogos cacheados
+// durante un reinicio del motor, y un "activa confidencial" perdido — por
+// descarte silencioso o por reiniciar la UI — dejaria al perfil en la nube
+// creyendose local. `entregado` distingue lo aun-no-enviado de lo enviado a
+// la espera del veredicto autoritativo.
+interface PerfilPendiente {
+  message: AvatarConfigMessage;
+  entregado: boolean;
+}
+const pendientesPerfil: PerfilPendiente[] = loadPendientesPerfil().map((message) => ({
+  message,
+  entregado: false,
+}));
+const persistirPerfiles = (): void =>
+  savePendientesPerfil(
+    pendientesPerfil.length > 0 ? pendientesPerfil.map((p) => p.message) : undefined,
+  );
+
+/** Un perfil recibido refleja ya todo lo pedido en un parche. */
+function coincidePerfil(perfil: AvatarOption, s: AvatarConfigMessage['settings']): boolean {
+  if (s.model !== undefined && perfil.model !== s.model) return false;
+  if (s.confidential !== undefined && perfil.confidential !== s.confidential) return false;
+  if (s.voiceId !== undefined && `${perfil.voice.engine}:${perfil.voice.name}` !== s.voiceId)
+    return false;
+  return true;
+}
+
+/**
+ * El mensaje `avatars` es el veredicto autoritativo sobre los perfiles: lo
+ * pedido que ya se refleja queda confirmado, y lo ENTREGADO que no se refleja
+ * es que el motor lo rechazo (su config-error ya se pinto) — tampoco se
+ * reintiene para siempre. Solo sigue en cola lo que aun no pudo enviarse.
+ */
+function confirmarPerfiles(list: AvatarOption[]): void {
+  let cambio = false;
+  for (let i = pendientesPerfil.length - 1; i >= 0; i--) {
+    const { message, entregado } = pendientesPerfil[i]!;
+    const perfil = list.find((a) => a.id === message.avatarId);
+    if (!perfil) continue;
+    if (coincidePerfil(perfil, message.settings) || entregado) {
+      pendientesPerfil.splice(i, 1);
+      cambio = true;
+    }
+  }
+  if (cambio) persistirPerfiles();
+}
 
 // Conexion con el motor: refleja el estado de la conversacion en el orbe y
 // muestra el ultimo texto. Si el motor no esta, reintenta hasta que aparezca.
@@ -58,9 +110,10 @@ const bridge = connectBridge((msg) => {
         log(`config pendiente → motor: ${JSON.stringify(pendiente)}`);
       }
     }
-    for (const mensaje of pendientesPerfil.splice(0)) {
-      if (bridge.send(mensaje)) {
-        log(`perfil pendiente → motor: avatar=${mensaje.avatarId}`);
+    for (const p of pendientesPerfil) {
+      if (!p.entregado && bridge.send(p.message)) {
+        p.entregado = true;
+        log(`perfil pendiente → motor: avatar=${p.message.avatarId}`);
       }
     }
   } else if (msg.type === 'state') {
@@ -92,6 +145,7 @@ const bridge = connectBridge((msg) => {
   } else if (msg.type === 'avatars') {
     avatar.setAvatarOptions(msg.list, msg.current);
     if (msg.current !== undefined) confirmarPendiente('agent', msg.current);
+    confirmarPerfiles(msg.list);
     const nombres = msg.list
       .map((a) => `${a.name}${a.confidential ? ' (confidencial)' : ''}`)
       .join(', ');
@@ -115,22 +169,29 @@ const bridge = connectBridge((msg) => {
 // de control. Viaja SOLO el parche de lo cambiado, nunca la cache entera; sin
 // motor, el parche se acumula para reenviarse al autenticar.
 avatar.setOnSettingsChanged((patch) => {
+  // TODO cambio queda pendiente (memoria y disco) hasta que el motor lo
+  // CONFIRME con su estado autoritativo: enviado no es aplicado — send() solo
+  // garantiza socket escribible, y un motor que caiga con el envio en el
+  // buffer no lo habra ni aplicado ni persistido.
+  pendiente = { ...pendiente, ...patch };
+  savePendiente(pendiente);
   if (bridge.send({ type: 'config', settings: patch })) {
     log(`config → motor: ${JSON.stringify(patch)}`);
   } else {
-    pendiente = { ...pendiente, ...patch };
-    savePendiente(pendiente);
     log(`config pendiente (sin motor): ${JSON.stringify(patch)}`);
   }
 });
 
 avatar.setOnAvatarSettingsChanged((message) => {
-  // Sin motor, el cambio de perfil se guarda para reenviarlo al autenticar; y
-  // el log dice la verdad (antes anunciaba "enviado" sobre un send ignorado).
+  // Mismo contrato que la config: en cola (memoria y disco) hasta el veredicto
+  // autoritativo del mensaje avatars; y el log dice la verdad en ambos casos.
+  const entrada: PerfilPendiente = { message, entregado: false };
+  pendientesPerfil.push(entrada);
+  persistirPerfiles();
   if (bridge.send(message)) {
+    entrada.entregado = true;
     log(`perfil → motor: avatar=${message.avatarId}, cambios=${JSON.stringify(message.settings)}`);
   } else {
-    pendientesPerfil.push(message);
     log(
       `perfil pendiente (sin motor): avatar=${message.avatarId}, cambios=${JSON.stringify(message.settings)}`,
     );
