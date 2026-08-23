@@ -72,12 +72,20 @@ log(
 );
 log(`lanza la cara con "npm run avatar" si no esta ya abierta`);
 
-// Cuando el agente cierra el stdio, la fachada se retira y borra su token.
-process.stdin.on('close', () => {
+// Apagado UNICO para todas las salidas: corta la voz en curso (los speakers
+// lanzan PowerShell/ffplay, y salir del padre no mata a esos hijos — el
+// avatar seguiria hablando con la fachada ya muerta), retira el puente y
+// borra su token.
+const apagar = (): never => {
+  try {
+    speaker?.stop();
+  } catch {
+    // cortar la voz es cortesia; no puede impedir el apagado
+  }
   bridge.stop();
   process.exit(0);
-});
-process.on('SIGINT', () => {
-  bridge.stop();
-  process.exit(0);
-});
+};
+// Cuando el agente cierra el stdio, la fachada se retira.
+process.stdin.on('close', apagar);
+process.on('SIGINT', apagar);
+process.on('SIGTERM', apagar);

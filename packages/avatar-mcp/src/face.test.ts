@@ -43,8 +43,10 @@ function perfil(id: string, name: string): AvatarProfile {
 class FakeSpeaker implements Speaker {
   spoken: string[] = [];
   fail = false;
+  delayMs = 0;
   async speak(text: string): Promise<void> {
     if (this.fail) throw new Error('sin voz');
+    if (this.delayMs > 0) await new Promise((r) => setTimeout(r, this.delayMs));
     this.spoken.push(text);
   }
   stop(): void {}
@@ -141,6 +143,29 @@ test('decir con gesto intercala el gesto tras el texto', async () => {
     await face.decir('hola', { gesto: 'saludo' });
     await tick();
     assert.deepEqual(tipos(cliente).slice(6), ['state', 'assistant', 'gesture', 'state']);
+  });
+});
+
+test('dos decir concurrentes no se solapan: la cola serializa el habla', async () => {
+  const speaker = new FakeSpeaker();
+  speaker.delayMs = 60;
+  await withFace({ speaker }, async (face, cliente) => {
+    await Promise.all([face.decir('primero'), face.decir('segundo')]);
+    await tick();
+    assert.deepEqual(speaker.spoken, ['primero', 'segundo'], 'en orden, no a la vez');
+    assert.deepEqual(
+      tipos(cliente).slice(6),
+      ['state', 'assistant', 'state', 'state', 'assistant', 'state'],
+      'la coreografia ENTERA de uno antes de empezar la del otro',
+    );
+    const estados = cliente.mensajes
+      .filter((m) => m.type === 'state')
+      .map((m) => (m.type === 'state' ? m.state : ''));
+    assert.deepEqual(
+      estados,
+      ['hablando', 'reposo', 'hablando', 'reposo'],
+      'sin cola, el primero en terminar mandaba reposo con el otro aun hablando',
+    );
   });
 });
 

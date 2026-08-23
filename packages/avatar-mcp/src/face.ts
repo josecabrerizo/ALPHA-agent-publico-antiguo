@@ -127,12 +127,26 @@ export class FaceController {
     this.bridge.broadcast({ type: 'state', state });
   }
 
+  /** Turno de habla en curso: las peticiones concurrentes se encolan detras. */
+  private turno: Promise<void> = Promise.resolve();
+
   /**
    * La coreografia completa de hablar: pose de hablando, texto en el
    * bocadillo, gesto opcional, voz si la hay (se espera a que termine de
    * sonar) y vuelta a reposo — pase lo que pase con el TTS.
+   *
+   * SERIALIZADO: un agente puede despachar dos `decir` a la vez, y el Speaker
+   * solo controla un proceso hijo — sin cola, los audios se solapaban y el
+   * primero en terminar mandaba `reposo` con el otro aun hablando.
    */
-  async decir(texto: string, opts: { gesto?: AvatarGesture } = {}): Promise<void> {
+  decir(texto: string, opts: { gesto?: AvatarGesture } = {}): Promise<void> {
+    const trabajo = this.turno.then(() => this.decirAhora(texto, opts));
+    // La cola nunca se rompe: el fallo se propaga al llamante, no al siguiente.
+    this.turno = trabajo.catch(() => {});
+    return trabajo;
+  }
+
+  private async decirAhora(texto: string, opts: { gesto?: AvatarGesture }): Promise<void> {
     const clean = texto.trim();
     if (!clean) return;
     this.estado('hablando');
