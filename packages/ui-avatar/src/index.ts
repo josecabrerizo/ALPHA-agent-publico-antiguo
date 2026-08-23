@@ -64,10 +64,10 @@ const bridge = connectBridge((msg) => {
 (globalThis as Record<string, unknown>)['__alphaBridge'] = bridge;
 
 // Lo que se cambie en el menu del avatar viaja al motor: el avatar es el panel
-// de control. (Si el motor no esta conectado, lo leera del fichero al arrancar.)
-avatar.setOnSettingsChanged((settings) => {
-  bridge.send({ type: 'config', settings });
-  log(`config → motor: agente=${settings.agent}, micro=${settings.audioDevice || '(sistema)'}`);
+// de control. Viaja SOLO el parche de lo cambiado, nunca la cache entera.
+avatar.setOnSettingsChanged((patch) => {
+  bridge.send({ type: 'config', settings: patch });
+  log(`config → motor: ${JSON.stringify(patch)}`);
 });
 
 avatar.setOnAvatarSettingsChanged((message) => {
