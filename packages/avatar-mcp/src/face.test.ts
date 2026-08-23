@@ -234,7 +234,12 @@ test('agente desconocido o ajustes de audio: config-error, no silencio', async (
     await tick();
     // La UI esta autenticada y su send() devuelve true: sin esta respuesta se
     // quedaria creyendo aplicado un ajuste que nadie gestiona aqui.
-    assert.equal(cliente.mensajes.filter((m) => m.type === 'config-error').length, 2);
+    const errores = cliente.mensajes.filter((m) => m.type === 'config-error');
+    assert.equal(errores.length, 2);
+    // Y con el eco del campo rechazado: es lo que saca el parche de la cola
+    // persistida de la UI en vez de dejarlo reintentandose por siempre.
+    const delMicro = errores[1];
+    assert.equal(delMicro?.type === 'config-error' && delMicro.settings?.micEnabled, true);
     // Y el estado autoritativo revierte el boton optimista: aqui no hay micro.
     const ultimo = cliente.mensajes.at(-1);
     assert.equal(ultimo?.type === 'mic' && ultimo.enabled, false);
@@ -243,10 +248,20 @@ test('agente desconocido o ajustes de audio: config-error, no silencio', async (
 
 test('editar un perfil desde la UI se rechaza y vuelve el estado autoritativo', async () => {
   await withFace({}, async (_face, cliente) => {
-    cliente.enviar({ type: 'avatar-config', avatarId: 'vulpis', settings: { confidential: true } });
+    cliente.enviar({
+      type: 'avatar-config',
+      avatarId: 'vulpis',
+      requestId: 'p-77',
+      settings: { confidential: true },
+    });
     await tick();
     const idx = cliente.mensajes.findIndex((m) => m.type === 'config-error');
     assert.ok(idx >= 0, 'la UI tiene que saber que NO se aplico');
+    const rechazo = cliente.mensajes[idx];
+    // Con la correlacion completa: sin ella, la UI reenviaria la peticion en
+    // cada reconexion y un motor real posterior podria aplicarla inesperada.
+    assert.equal(rechazo?.type === 'config-error' && rechazo.avatarId, 'vulpis');
+    assert.equal(rechazo?.type === 'config-error' && rechazo.requestId, 'p-77');
     assert.ok(
       cliente.mensajes.slice(idx).some((m) => m.type === 'avatars'),
       'y recibir el estado real para deshacer su seleccion optimista',

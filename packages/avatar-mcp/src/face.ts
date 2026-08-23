@@ -67,7 +67,13 @@ export class FaceController {
         try {
           this.cambiarAvatar(s.agent);
         } catch (err) {
-          this.bridge.broadcast({ type: 'config-error', message: (err as Error).message });
+          // Eco del campo rechazado: es el veredicto que saca el parche de la
+          // cola persistida de la UI (sin el, se reintentaria por siempre).
+          this.bridge.broadcast({
+            type: 'config-error',
+            message: (err as Error).message,
+            settings: { agent: s.agent },
+          });
           this.sendAvatars();
         }
       }
@@ -76,16 +82,25 @@ export class FaceController {
           type: 'config-error',
           message:
             'esta cara la conduce un agente externo; el microfono y el audio se gestionan con el motor real',
+          settings: {
+            ...(s.micEnabled !== undefined ? { micEnabled: s.micEnabled } : {}),
+            ...(s.audioDevice !== undefined ? { audioDevice: s.audioDevice } : {}),
+          },
         });
         // La UI ya cambio su boton en optimista al pulsar: el estado
         // autoritativo lo revierte — aqui el micro no existe, siempre off.
         this.bridge.broadcast({ type: 'mic', enabled: false });
       }
     });
-    bridge.onAvatarConfigMessage(() => {
+    bridge.onAvatarConfigMessage((msg) => {
+      // Con avatarId y requestId, como el motor real: el rechazo cae sobre LA
+      // peticion de la cola de la UI, que si no la reenviaria en cada
+      // reconexion (y un motor real posterior podria aplicarla inesperadamente).
       this.bridge.broadcast({
         type: 'config-error',
         message: 'los perfiles (modelo, voz, confidencial) se editan con el motor real conectado',
+        avatarId: msg.avatarId,
+        ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
       });
       this.sendAvatars();
     });
