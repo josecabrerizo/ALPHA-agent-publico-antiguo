@@ -43,16 +43,22 @@ if (!(await bridge.start())) {
 // yaml del motor (un test del engine los compara) y el respaldo de la UI.
 const profiles = [...FOUNDER_AVATARS];
 
-const face = new FaceController(bridge, profiles, process.env['ALPHA_MCP_AVATAR'], (active) =>
-  createFacadeSpeaker(active, { log }),
-);
+// La etiqueta del log de arranque sale de lo que la fabrica CREO de verdad:
+// fuera de Windows o con un ALPHA_MCP_TTS invalido devuelve undefined, y
+// anunciar "voz sapi" alli contradiria el aviso de "cara muda" que ya emitio.
+let vozCreada = false;
+const face = new FaceController(bridge, profiles, process.env['ALPHA_MCP_AVATAR'], (active) => {
+  const speaker = createFacadeSpeaker(active, { log });
+  vozCreada = speaker !== undefined;
+  return speaker;
+});
 
 const server = new McpServer({ name: 'alpha-avatar', version: '0.0.1' });
 registerFaceTools(server, face);
 await server.connect(new StdioServerTransport());
 
 log(
-  `listo: puente en 127.0.0.1:${port}, ${face.avatares().length} avatares (activo: ${face.activo.id}), voz ${(process.env['ALPHA_MCP_TTS'] ?? 'sapi') === 'off' ? 'apagada' : 'sapi'}`,
+  `listo: puente en 127.0.0.1:${port}, ${face.avatares().length} avatares (activo: ${face.activo.id}), voz ${vozCreada ? 'sapi' : 'apagada'}`,
 );
 log(`lanza la cara con "npm run avatar" si no esta ya abierta`);
 
