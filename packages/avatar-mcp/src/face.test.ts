@@ -106,7 +106,9 @@ const tipos = (c: FakeClient) => c.mensajes.map((m) => m.type);
 
 test('al autenticarse, la fachada se presenta como lo haria el motor', async () => {
   await withFace({ activeId: 'nexus' }, async (_face, cliente) => {
-    assert.deepEqual(tipos(cliente), ['ready', 'avatars', 'devices', 'voices', 'models']);
+    assert.deepEqual(tipos(cliente), ['ready', 'mic', 'avatars', 'devices', 'voices', 'models']);
+    const mic = cliente.mensajes.find((m) => m.type === 'mic');
+    assert.equal(mic?.type === 'mic' && mic.enabled, false, 'la fachada nunca captura');
     const avatars = cliente.mensajes.find((m) => m.type === 'avatars');
     assert.equal(avatars?.type === 'avatars' && avatars.current, 'nexus');
     const primero = avatars?.type === 'avatars' ? avatars.list[0] : undefined;
@@ -123,7 +125,7 @@ test('decir hace la coreografia entera: hablando, texto, voz, reposo', async () 
   await withFace({ speaker }, async (face, cliente) => {
     await face.decir('hola humano');
     await tick();
-    const despues = tipos(cliente).slice(5); // tras la presentacion
+    const despues = tipos(cliente).slice(6); // tras la presentacion
     assert.deepEqual(despues, ['state', 'assistant', 'state']);
     const estados = cliente.mensajes.filter((m) => m.type === 'state');
     assert.deepEqual(
@@ -138,7 +140,7 @@ test('decir con gesto intercala el gesto tras el texto', async () => {
   await withFace({}, async (face, cliente) => {
     await face.decir('hola', { gesto: 'saludo' });
     await tick();
-    assert.deepEqual(tipos(cliente).slice(5), ['state', 'assistant', 'gesture', 'state']);
+    assert.deepEqual(tipos(cliente).slice(6), ['state', 'assistant', 'gesture', 'state']);
   });
 });
 
@@ -161,7 +163,7 @@ test('saludar sin texto solo agita la mano', async () => {
   await withFace({}, async (face, cliente) => {
     await face.saludar();
     await tick();
-    assert.deepEqual(tipos(cliente).slice(5), ['gesture']);
+    assert.deepEqual(tipos(cliente).slice(6), ['gesture']);
   });
 });
 
@@ -203,11 +205,14 @@ test('agente desconocido o ajustes de audio: config-error, no silencio', async (
     await tick();
     assert.equal(face.activo.id, 'vulpis');
     assert.equal(cliente.mensajes.filter((m) => m.type === 'config-error').length, 1);
-    cliente.enviar({ type: 'config', settings: { micEnabled: false } });
+    cliente.enviar({ type: 'config', settings: { micEnabled: true } });
     await tick();
     // La UI esta autenticada y su send() devuelve true: sin esta respuesta se
     // quedaria creyendo aplicado un ajuste que nadie gestiona aqui.
     assert.equal(cliente.mensajes.filter((m) => m.type === 'config-error').length, 2);
+    // Y el estado autoritativo revierte el boton optimista: aqui no hay micro.
+    const ultimo = cliente.mensajes.at(-1);
+    assert.equal(ultimo?.type === 'mic' && ultimo.enabled, false);
   });
 });
 

@@ -77,6 +77,9 @@ export class FaceController {
           message:
             'esta cara la conduce un agente externo; el microfono y el audio se gestionan con el motor real',
         });
+        // La UI ya cambio su boton en optimista al pulsar: el estado
+        // autoritativo lo revierte — aqui el micro no existe, siempre off.
+        this.bridge.broadcast({ type: 'mic', enabled: false });
       }
     });
     bridge.onAvatarConfigMessage(() => {
@@ -95,6 +98,10 @@ export class FaceController {
    * reconfigura, solo da la cara.
    */
   presentar(): void {
+    // Estado autoritativo del micro, lo primero (como hace el motor): esta
+    // fachada NO captura nunca, y la cache de la UI puede venir de una sesion
+    // con el motor real mostrando "Escuchando" sobre una captura que no existe.
+    this.bridge.broadcast({ type: 'mic', enabled: false });
     this.sendAvatars();
     this.bridge.broadcast({ type: 'devices', inputs: [] });
     this.bridge.broadcast({ type: 'voices', list: [] });
