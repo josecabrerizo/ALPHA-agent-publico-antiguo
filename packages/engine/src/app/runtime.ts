@@ -371,7 +371,10 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
       applyConfig(msg).catch((err: unknown) => {
         const message = (err as Error).message;
         log(`✗ [config] ${message}`);
-        bridge.broadcast({ type: 'config-error', message });
+        // El eco de settings es el veredicto para la cola de la UI: sin el,
+        // un parche irrecuperable (un agente desconocido, por ejemplo) se
+        // reintentaria en cada reconexion para siempre.
+        bridge.broadcast({ type: 'config-error', message, settings: msg.settings });
         sendAvatars();
       });
     });
