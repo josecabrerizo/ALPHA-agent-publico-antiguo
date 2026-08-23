@@ -45,6 +45,9 @@ export class FaceController {
   private inbox: FaceMessage[] = [];
   /** La voz del avatar ACTIVO: se recrea al cambiar de perfil (la fabrica). */
   private speaker: Speaker | undefined;
+  /** Voces sustituidas que podrian seguir sonando (un decir en vuelo cuando
+   *  cambio el avatar): detener() las corta TODAS, no solo la vigente. */
+  private readonly vocesRetiradas: Speaker[] = [];
 
   constructor(
     private readonly bridge: AvatarBridge,
@@ -205,8 +208,13 @@ export class FaceController {
     this.active = next;
     // La voz pertenece al PERFIL: se recrea con la del nuevo (si no, Nexus
     // seguiria hablando con la voz y el ritmo de Unit-A). La cola de habla no
-    // se corta; lo que quede en ella sale ya con la voz nueva.
-    if (this.speakerFor) this.speaker = this.speakerFor(next);
+    // se corta; lo que quede en ella sale ya con la voz nueva. La sustituida
+    // se RETIENE: un decir en vuelo puede seguir sonando por ella, y perder
+    // su referencia dejaria a su proceso hijo fuera del alcance de detener().
+    if (this.speakerFor) {
+      if (this.speaker) this.vocesRetiradas.push(this.speaker);
+      this.speaker = this.speakerFor(next);
+    }
     this.sendAvatars();
     return next;
   }
@@ -218,9 +226,16 @@ export class FaceController {
     return out;
   }
 
-  /** Corta la voz en curso (apagado de la fachada). */
+  /** Corta la voz en curso Y las sustituidas (apagado de la fachada). */
   detener(): void {
     this.speaker?.stop();
+    for (const voz of this.vocesRetiradas) {
+      try {
+        voz.stop();
+      } catch {
+        // cortar cada voz es cortesia; una que falle no protege a las demas
+      }
+    }
   }
 
   get activo(): AvatarProfile {

@@ -44,12 +44,15 @@ class FakeSpeaker implements Speaker {
   spoken: string[] = [];
   fail = false;
   delayMs = 0;
+  stops = 0;
   async speak(text: string): Promise<void> {
     if (this.fail) throw new Error('sin voz');
     if (this.delayMs > 0) await new Promise((r) => setTimeout(r, this.delayMs));
     this.spoken.push(text);
   }
-  stop(): void {}
+  stop(): void {
+    this.stops++;
+  }
   describe(): { engine: 'sapi'; voice: string; local: boolean } {
     return { engine: 'sapi', voice: 'fake', local: true };
   }
@@ -213,6 +216,23 @@ test('cambiar de avatar recrea la voz: la del PERFIL nuevo, no la del viejo', as
       ['dos'],
       'Nexus no puede hablar con la voz (ni el ritmo) de Unit-A',
     );
+  });
+});
+
+test('detener() corta tambien las voces sustituidas, no solo la vigente', async () => {
+  const vulpis = new FakeSpeaker();
+  const nexus = new FakeSpeaker();
+  const porPerfil = new Map<string, FakeSpeaker>([
+    ['vulpis', vulpis],
+    ['nexus', nexus],
+  ]);
+  await withFace({ speakerFor: (p) => porPerfil.get(p.id) }, async (face) => {
+    face.cambiarAvatar('nexus');
+    face.detener();
+    // La retirada podia seguir sonando por un decir en vuelo: sin retenerla,
+    // su proceso hijo quedaba fuera del alcance del apagado.
+    assert.equal(vulpis.stops, 1, 'la voz sustituida tambien se corta');
+    assert.equal(nexus.stops, 1);
   });
 });
 
