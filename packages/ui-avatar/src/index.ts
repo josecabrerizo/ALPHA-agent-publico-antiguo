@@ -203,11 +203,13 @@ const bridge = connectBridge((msg) => {
     if (msg.avatarId !== undefined) rechazarPerfiles(msg.avatarId, msg.requestId);
     // Eco de campos rechazados: veredicto para el parche de config — sin el,
     // un agente desconocido (o el micro contra la fachada, que no captura) se
-    // reintentaria en cada reconexion para siempre.
+    // reintentaria en cada reconexion para siempre. Solo limpia si el VALOR
+    // rechazado sigue siendo el pendiente: un rechazo tardio del valor viejo
+    // no puede llevarse al nuevo, que aun espera su propio veredicto.
     if (msg.settings) {
       let cambio = false;
       for (const campo of ['agent', 'audioDevice', 'micEnabled'] as const) {
-        if (msg.settings[campo] !== undefined && pendiente[campo] !== undefined) {
+        if (msg.settings[campo] !== undefined && pendiente[campo] === msg.settings[campo]) {
           delete pendiente[campo];
           cambio = true;
         }
