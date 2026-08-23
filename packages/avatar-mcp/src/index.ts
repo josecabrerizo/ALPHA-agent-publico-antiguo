@@ -20,7 +20,7 @@ import './stdout-guard.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { AvatarBridge, AVATAR_BRIDGE_PORT } from '@alpha/protocol';
-import { loadAvatars, createSpeaker, type Speaker } from '@alpha/engine';
+import { loadAvatars, createSpeaker, type AvatarProfile, type Speaker } from '@alpha/engine';
 import { FaceController } from './face.js';
 import { registerFaceTools } from './tools.js';
 
