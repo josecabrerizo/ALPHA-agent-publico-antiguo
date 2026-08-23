@@ -140,6 +140,18 @@ export class AvatarBridge {
     if (!this.authed.has(socket)) {
       if (m['type'] === 'auth' && typeof m['token'] === 'string' && this.tokenMatches(m['token'])) {
         this.authed.add(socket);
+        // El desajuste de version se avisa TAMBIEN en este lado: un avatar mas
+        // viejo que el motor no manda version (o manda otra) y no sabria leer
+        // la que viaja en el ready — el warn del cliente solo cubre el
+        // despliegue inverso. Versiones dispares no cortan nada (los mensajes
+        // desconocidos se ignoran), pero un desajuste mudo es indepurable.
+        const clientVersion = m['version'];
+        if (clientVersion !== PROTOCOL_VERSION)
+          console.warn(
+            `[puente] protocolo del avatar ${
+              typeof clientVersion === 'number' ? `v${clientVersion}` : 'sin version'
+            } != v${PROTOCOL_VERSION} del motor; conviene actualizar ambos lados`,
+          );
         // Acuse explicito: sin el, la UI no puede distinguir "socket abierto"
         // de "motor escuchandome", y daba por enviado lo que se tiraba. Lleva
         // la version del protocolo para delatar un motor y un avatar dispares.
