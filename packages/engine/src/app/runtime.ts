@@ -22,6 +22,12 @@ import {
   type AvatarProfilePatch,
 } from '../config/avatars.js';
 import { saveLiveSettings } from '../config/settings-store.js';
+import {
+  connectMcpProviders,
+  connectMcpServer,
+  type McpToolProvider,
+} from '../brain/mcp/provider.js';
+import { parseMcpServers } from '../brain/mcp/types.js';
 import { isGreeting } from '../conversation/greeting.js';
 import { ConversationSession, type ConversationState } from '../conversation/session.js';
 import type { AlphaConfig } from '../config/schema.js';
@@ -109,6 +115,30 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
   await skills.load();
   const tools = new ToolRegistry().registerAll(BUILTIN_TOOLS).registerAll(skills.tools());
 
+  // Servidores MCP declarados en la config. Se CONECTAN mas abajo, dentro del
+  // ambito de limpieza del arranque: si algo falla despues de conectarlos hay
+  // que poder cerrarlos, o un hijo stdio sin dueno sobrevive al arranque
+  // fallido. Los configs parseados se guardan para la reconciliacion en
+  // caliente al entrar/salir del modo confidencial.
+  const mcpConfigs = parseMcpServers(config.mcp.servers).servers;
+  const mcpProviders: McpToolProvider[] = [];
+  // Que tools registro CADA provider: el des-registro va por dueño, no por
+  // nombre. Y una colision de nombres se OMITE en vez de pisar: si pisara,
+  // cerrar al que piso se llevaria la tool del otro (o hasta una builtin).
+  const mcpOwned = new Map<McpToolProvider, string[]>();
+  const registerMcpTools = (provider: McpToolProvider): void => {
+    const owned: string[] = [];
+    for (const tool of provider.tools()) {
+      if (tools.has(tool.name)) {
+        log(`✗ [mcp] herramienta duplicada "${tool.name}": se omite (ya hay una con ese nombre)`);
+        continue;
+      }
+      tools.register(tool);
+      owned.push(tool.name);
+    }
+    mcpOwned.set(provider, owned);
+  };
+
   // Toman los valores por parametro (no del cierre) para poder construir y
   // validar candidatos ANTES de comprometer el estado — reconfiguracion
   // transaccional. brain y tts salen de la config unificada.
@@ -153,8 +183,26 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
   // otra instancia (probar cambios sin matar la que este en uso).
   const bridgePort = Number(process.env['ALPHA_BRIDGE_PORT']) || AVATAR_BRIDGE_PORT;
   const bridge = new AvatarBridge(bridgePort);
-  const bridgeUp = await bridge.start();
+  let bridgeUp = false;
   try {
+    // Las tools MCP entran al MISMO registro que las builtin y las skills; un
+    // servidor caido se dice y se omite, y los no locales quedan sujetos al
+    // contrato confidencial (en confidencial ni se conectan; ademas el cerebro
+    // no los ensena y su run() se niega).
+    //
+    // ANTES de abrir el puente a proposito: si el puerto ya escuchara mientras
+    // este await espera a un servidor MCP lento, una UI en marcha se
+    // autenticaria contra un motor sin manejadores instalados — recibiria el
+    // ready, reenviaria sus pendientes a nadie y se perderia el saludo con el
+    // estado autoritativo del micro. Entre start() y los registros de abajo
+    // no queda ningun await.
+    for (const provider of await connectMcpProviders(config.mcp.servers, log, { confidential })) {
+      mcpProviders.push(provider);
+      registerMcpTools(provider);
+    }
+
+    bridgeUp = await bridge.start();
+
     // Copia, no el mismo objeto: si la sesion y el runtime compartieran
     // captureOptions, mutar el device aqui haria que setAudioDevice lo viera "ya
     // aplicado" y no reiniciara la captura. currentMic lleva aparte cual es el activo.
@@ -174,6 +222,10 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
         onLevel: (level, speaking) => cb.onLevel?.(level, speaking),
         onLog: (m) => log(`   ${m}`),
         onMicChange: (enabled) => {
+          // El mic AUTORITATIVO no se emite aqui sino tras persistir (ver
+          // applyConfig): para la UI, confirmado = aplicado Y guardado — si
+          // solo se aplicara, un fallo de disco le haria soltar su pendiente
+          // y el siguiente arranque capturaria con el ajuste viejo.
           // Con el micro cerrado no esta "escuchando": el avatar pasa a reposo.
           if (!enabled) bridge.broadcast({ type: 'state', state: 'reposo' });
           cb.onMicChange?.(enabled);
@@ -197,12 +249,12 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
     // microfono cerrado, se arranca cerrado (y el indicador del sistema, apagado).
     if (!config.audio.micEnabled) session.setMicEnabled(false);
 
-    // Persistencia de los ajustes en vivo: el MOTOR es el unico que escribe el
-    // fichero (la UI solo manda el cambio por el puente). No poder guardarlo se
-    // avisa y se sigue: el ajuste ya esta aplicado.
-    const persist = (patch: Parameters<typeof saveLiveSettings>[0]): void => {
-      if (!saveLiveSettings(patch)) log(`no se pudo guardar alpha.settings.json`);
-    };
+    // Ajustes aplicados en vivo pero SIN persistir (el disco fallo): mientras
+    // un flag este alto, el saludo no confirma ese valor — confirmar en falso
+    // haria a la UI soltar su pendiente y el proximo arranque volveria al
+    // ajuste viejo (en el caso del mute, capturando).
+    let micSinPersistir = false;
+    let deviceSinPersistir = false;
 
     // Manda al avatar la lista de microfonos disponibles (al arrancar y cada vez
     // que un avatar se conecta), marcando el activo.
@@ -212,7 +264,13 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
           name: d.name,
           isDefault: d.isDefault,
         }));
-        bridge.broadcast({ type: 'devices', inputs, current: currentMic });
+        // Sin current mientras el dispositivo siga sin persistir: current es
+        // la CONFIRMACION del cambio para la UI, y la lista viaja igual.
+        bridge.broadcast({
+          type: 'devices',
+          inputs,
+          ...(deviceSinPersistir ? {} : { current: currentMic }),
+        });
       } catch (err) {
         log(`✗ [devices] ${(err as Error).message}`);
       }
@@ -273,6 +331,21 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
 
     /** Todo lo que hay que mandarle a un avatar recien autenticado. */
     async function greetClient(): Promise<void> {
+      // El micro, lo primero: es una promesa de privacidad y la cache de la
+      // UI puede venir de otro arranque. Pero el saludo solo confirma lo
+      // PERSISTIDO: si un guardado anterior fallo, se reintenta aqui y, si
+      // sigue fallando, no se emite — la UI conserva su pendiente.
+      if (micSinPersistir && saveLiveSettings({ micEnabled: session.isMicEnabled() })) {
+        micSinPersistir = false;
+      }
+      if (!micSinPersistir) {
+        bridge.broadcast({ type: 'mic', enabled: session.isMicEnabled() });
+      }
+      // Mismo contrato para el dispositivo: reintentar y, si sigue sin
+      // guardarse, sendDevices omitira el current que lo confirmaria.
+      if (deviceSinPersistir && saveLiveSettings({ audioDevice: currentMic })) {
+        deviceSinPersistir = false;
+      }
       void sendDevices();
       sendAvatars();
       sendModels();
@@ -298,7 +371,10 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
       applyConfig(msg).catch((err: unknown) => {
         const message = (err as Error).message;
         log(`✗ [config] ${message}`);
-        bridge.broadcast({ type: 'config-error', message });
+        // El eco de settings es el veredicto para la cola de la UI: sin el,
+        // un parche irrecuperable (un agente desconocido, por ejemplo) se
+        // reintentaria en cada reconexion para siempre.
+        bridge.broadcast({ type: 'config-error', message, settings: msg.settings });
         sendAvatars();
       });
     });
@@ -307,7 +383,15 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
       applyAvatarConfig(msg).catch((err: unknown) => {
         const message = (err as Error).message;
         log(`✗ [avatar-config] ${message}`);
-        bridge.broadcast({ type: 'config-error', message });
+        // Con avatarId Y requestId: el veredicto CORRELACIONADO cae sobre UNA
+        // peticion de la cola de la UI (solo avatarId borraria a las hermanas
+        // del mismo perfil que aun no tienen veredicto).
+        bridge.broadcast({
+          type: 'config-error',
+          message,
+          avatarId: msg.avatarId,
+          ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
+        });
         // Confirmacion autoritativa: ante un rechazo la UI vuelve a pintar lo que
         // de verdad sigue guardado y no conserva una seleccion optimista.
         sendAvatars();
@@ -318,26 +402,107 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
       const s = msg.settings;
 
       // Silenciar el microfono: independiente del resto: sigue valiendo el chat
-      // escrito y no toca modelo, voz ni avatar.
+      // escrito y no toca modelo, voz ni avatar. El mic autoritativo solo
+      // viaja si ADEMAS quedo persistido: es lo que le dice a la UI que puede
+      // soltar su parche pendiente, y un mute aplicado pero no guardado se
+      // perderia en el siguiente arranque.
       if (typeof s.micEnabled === 'boolean' && s.micEnabled !== session.isMicEnabled()) {
         session.setMicEnabled(s.micEnabled);
-        persist({ micEnabled: s.micEnabled });
+        if (saveLiveSettings({ micEnabled: s.micEnabled })) {
+          micSinPersistir = false;
+          bridge.broadcast({ type: 'mic', enabled: s.micEnabled });
+        } else {
+          micSinPersistir = true;
+          log(`no se pudo guardar alpha.settings.json; el mute queda sin confirmar`);
+        }
       }
 
       // Microfono: reinicia la captura con el nuevo dispositivo. Se deja que
-      // setAudioDevice sea quien actualiza el estado de la sesion.
+      // setAudioDevice sea quien actualiza el estado de la sesion. La difusion
+      // de devices con el current nuevo es la CONFIRMACION para la UI, y solo
+      // viaja con la persistencia hecha (mismo contrato que el mic).
       if (typeof s.audioDevice === 'string' && s.audioDevice && s.audioDevice !== currentMic) {
         currentMic = s.audioDevice;
         session.setAudioDevice(s.audioDevice);
-        persist({ audioDevice: s.audioDevice });
+        if (saveLiveSettings({ audioDevice: s.audioDevice })) {
+          deviceSinPersistir = false;
+          void sendDevices();
+        } else {
+          deviceSinPersistir = true;
+          log(`no se pudo guardar alpha.settings.json; el microfono queda sin confirmar`);
+        }
         log(`⚙️  microfono desde el avatar: ${s.audioDevice}`);
       }
 
       if (!s.agent || s.agent === avatar?.id) return;
       const nextAvatar = avatarById(s.agent);
       if (!nextAvatar) throw new Error(`avatar desconocido: "${s.agent}"`);
+      // Validar ANTES de persistir (describe lanza con modelo o clave malos) y
+      // persistir ANTES de activar: activateAvatar difunde el avatars que
+      // CONFIRMA a la UI, y confirmar sin guardar perderia la seleccion en el
+      // proximo arranque — quiza volviendo de un perfil confidencial a uno de
+      // nube. Si el disco falla, se lanza: el catch pinta config-error y
+      // redifunde el estado real, y la UI conserva su pendiente.
+      makeBrain(
+        process.env['ALPHA_MODEL'] ?? nextAvatar.model,
+        confidentialForced || nextAvatar.confidential,
+        nextAvatar,
+      ).describe();
+      makeSpeaker(confidentialForced || nextAvatar.confidential, nextAvatar).describe();
+      if (!saveLiveSettings({ agent: nextAvatar.id })) {
+        throw new Error('no se pudo guardar la seleccion de avatar (alpha.settings.json)');
+      }
       activateAvatar(nextAvatar);
-      persist({ agent: nextAvatar.id });
+    }
+
+    /**
+     * El contrato confidencial aplicado a las CONEXIONES MCP, no solo a sus
+     * tools: al entrar en confidencial se cierran y des-registran los
+     * servidores no locales (un hijo stdio o una sesion http vivos pueden
+     * seguir saliendo a la red aunque sus tools esten bloqueadas); al salir,
+     * se reconectan y re-registran. La generacion invalida reconciliaciones
+     * RANCIAS: si el modo vuelve a cambiar durante una conexion lenta, lo
+     * conectado se descarta en vez de registrarse ya en confidencial.
+     */
+    let mcpGeneration = 0;
+    async function reconcileMcpProviders(nowConfidential: boolean): Promise<void> {
+      const generation = ++mcpGeneration;
+      if (nowConfidential) {
+        // Primero, SIN awaits: fuera del registro TODAS las tools remotas de
+        // golpe. El turno en curso sigue vivo (reconfigure no lo corta) y no
+        // puede despachar una tool remota mientras se cierra la primera.
+        const remotos = mcpProviders.filter((p) => !p.local);
+        for (const provider of remotos) {
+          for (const name of mcpOwned.get(provider) ?? []) tools.unregister(name);
+          mcpOwned.delete(provider);
+          mcpProviders.splice(mcpProviders.indexOf(provider), 1);
+        }
+        // Despues, los cierres (pueden ser lentos; ya no queda nada registrado).
+        for (const provider of remotos) {
+          await provider.close().catch(() => {});
+          log(`mcp "${provider.id}" cerrado: modo confidencial`);
+        }
+        return;
+      }
+      const conectados = new Set(mcpProviders.map((p) => p.id));
+      for (const server of mcpConfigs) {
+        // La rancidez se comprueba ANTES de cada intento: una reconciliacion
+        // invalidada no puede lanzar ni un handshake mas (el handshake en si
+        // ya manda datos), asi que se abandona ENTERA, no solo su resultado.
+        if (generation !== mcpGeneration || confidential) return;
+        if (!server.enabled || server.local || conectados.has(server.id)) continue;
+        const provider = await connectMcpServer(server, log);
+        if (!provider) continue;
+        // ...y tras el await: si el modo cambio (o el runtime se paro)
+        // mientras conectaba, lo conectado se cierra sin registrar.
+        if (generation !== mcpGeneration || confidential) {
+          await provider.close().catch(() => {});
+          log(`mcp "${server.id}" descartado: el modo cambio mientras conectaba`);
+          return;
+        }
+        mcpProviders.push(provider);
+        registerMcpTools(provider);
+      }
     }
 
     /** Valida y activa un perfil completo: sus tres opciones viajan juntas. */
@@ -349,12 +514,18 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
       const nextSpeaker = makeSpeaker(nextConfidential, nextAvatar);
       const voiceInfo = nextSpeaker.describe();
 
+      const wasConfidential = confidential;
       brain = nextBrain;
       speaker = nextSpeaker;
       model = nextModel;
       confidential = nextConfidential;
       avatar = nextAvatar;
       session.reconfigure({ brain, speaker });
+      if (confidential !== wasConfidential) {
+        reconcileMcpProviders(confidential).catch((err: unknown) =>
+          log(`✗ [mcp] reconciliando: ${(err as Error).message}`),
+        );
+      }
       sendAvatars();
       log(
         `⚙️  ${nextAvatar.name} · ${info.provider}/${info.model} · voz ${voiceInfo.voice}${confidential ? ' · confidencial' : ''}`,
@@ -452,12 +623,25 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
       stop: () => {
         session.stop();
         bridge.stop();
+        // Invalida cualquier reconciliacion EN VUELO: una conexion que
+        // complete tras el apagado se descarta y se cierra en su bucle, en
+        // vez de registrarse sobre un runtime ya parado.
+        mcpGeneration += 1;
+        // Cerrar es cortesia (mata el proceso hijo de un stdio); un fallo aqui
+        // no puede impedir el apagado.
+        for (const provider of mcpProviders) {
+          provider.close().catch(() => {});
+        }
       },
     };
   } catch (err) {
-    // Un fallo posterior del arranque no puede dejar el puente vivo: quedaria
-    // el socket escuchando y el token en disco sin nadie que los pare.
+    // Un fallo posterior del arranque no puede dejar NADA vivo: ni el puente
+    // (socket escuchando, token en disco) ni los servidores MCP ya conectados
+    // (un hijo stdio sin dueno seguiria corriendo para siempre).
     bridge.stop();
+    for (const provider of mcpProviders) {
+      provider.close().catch(() => {});
+    }
     throw err;
   }
 }

@@ -112,6 +112,7 @@ function normalize(entry: unknown): AvatarProfile | undefined {
   };
 
   const image = str(e['image']);
+  if (image) warnIfUnconventionalImage(id, image);
   return {
     id,
     name,
@@ -125,6 +126,25 @@ function normalize(entry: unknown): AvatarProfile | undefined {
     color: parseColor(e['color']) ?? DEFAULT_ORB_COLOR,
     voice,
   };
+}
+
+/**
+ * Del campo image solo viaja su imageId: la UI resuelve el arte contra SU
+ * carpeta de assets (assets/avatars/<imageId>.png|.svg). Una ruta fuera de esa
+ * convencion antes funcionaba (viajaba absoluta) y ahora degradaria al orbe en
+ * silencio, asi que se DICE al cargar el perfil.
+ */
+function warnIfUnconventionalImage(id: string, image: string): void {
+  const normalized = image.replace(/\\/g, '/');
+  const ext = path.extname(normalized).toLowerCase();
+  const conventional =
+    normalized.startsWith('assets/avatars/') && (ext === '.png' || ext === '.svg');
+  if (!conventional) {
+    console.warn(
+      `avatars.yaml: la imagen de "${id}" (${image}) esta fuera de assets/avatars/*.png|.svg; ` +
+        `solo viaja su imageId y la UI la buscara como assets/avatars/<imageId>.png|.svg`,
+    );
+  }
 }
 
 /** [r, g, b] en 0..255, o nada: un color a medias no puede colarse en la UI. */

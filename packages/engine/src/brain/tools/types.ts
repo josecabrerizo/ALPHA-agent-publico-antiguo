@@ -9,6 +9,9 @@ export interface JsonSchema {
   type: 'object';
   properties: Record<string, unknown>;
   required?: string[];
+  /** El resto del esquema ($defs, additionalProperties...) viaja tal cual:
+   *  recortarlo deja $refs colgando y el proveedor rechaza la peticion. */
+  [key: string]: unknown;
 }
 
 export interface ToolContext {
@@ -26,6 +29,12 @@ export interface Tool {
    * Las de solo lectura (hora, leer pantalla) van a false.
    */
   destructive?: boolean;
+  /**
+   * false si la herramienta manda datos FUERA de la maquina (un servidor MCP
+   * remoto). undefined = local: las builtin y las skills no salen a la red.
+   * En modo confidencial, las no locales ni se ensenan al modelo.
+   */
+  local?: boolean;
   /**
    * Ejecuta la herramienta. `args` viene del JSON que produce el MODELO: esta
    * parseado, pero sus valores pueden ser cualquier cosa aunque el esquema pida

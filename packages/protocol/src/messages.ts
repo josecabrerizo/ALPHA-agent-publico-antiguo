@@ -73,6 +73,12 @@ export type EngineToAvatarMessage =
   /** Acuse del handshake: hasta recibirlo, el avatar no esta autenticado. */
   | { type: 'ready'; version: number }
   | { type: 'state'; state: AvatarWireState }
+  /**
+   * Estado REAL del microfono del motor (autoritativo). Viaja al autenticarse
+   * y en cada cambio: sin el, la cache de presentacion de la UI podia mostrar
+   * un micro silenciado mientras el motor capturaba (o al reves).
+   */
+  | { type: 'mic'; enabled: boolean }
   /** Gesto puntual decidido por el MOTOR (la UI no infiere nada del texto). */
   | { type: 'gesture'; gesture: AvatarGesture }
   | { type: 'user'; text: string }
@@ -81,7 +87,19 @@ export type EngineToAvatarMessage =
   | { type: 'avatars'; list: AvatarOption[]; current?: string }
   | { type: 'voices'; list: VoiceOption[] }
   | { type: 'models'; list: ModelOption[] }
-  | { type: 'config-error'; message: string };
+  /**
+   * Rechazo de un cambio, con la correlacion que permite a la UI resolver SU
+   * cola: avatarId (+ requestId de la peticion, si viajo) cuando rechaza un
+   * avatar-config, y el eco de los campos rechazados (`settings`) cuando
+   * rechaza un config — sin veredicto, la UI reintentaria para siempre.
+   */
+  | {
+      type: 'config-error';
+      message: string;
+      avatarId?: string;
+      requestId?: string;
+      settings?: ConfigMessage['settings'];
+    };
 
 /** Avatar -> motor: handshake. El token sale del fichero que deja el motor. */
 export interface AuthMessage {
@@ -106,6 +124,13 @@ export interface ConfigMessage {
 export interface AvatarConfigMessage {
   type: 'avatar-config';
   avatarId: string;
+  /**
+   * Identificador de ESTA peticion, generado por el cliente. El rechazo lo
+   * devuelve (config-error.requestId) para que el veredicto caiga sobre una
+   * sola peticion: correlacionar solo por avatarId borraria de la cola las
+   * peticiones hermanas del mismo perfil aun sin veredicto.
+   */
+  requestId?: string;
   settings: {
     model?: string;
     confidential?: boolean;

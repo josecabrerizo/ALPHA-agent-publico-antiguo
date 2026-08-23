@@ -51,6 +51,15 @@ export interface ConversationConfig {
   bargeInMinMs: number;
 }
 
+export interface McpConfig {
+  /**
+   * Servidores MCP declarados, clave = id. La forma exacta de cada entrada la
+   * valida el adaptador (brain/mcp/types.ts, parseMcpServers): asi la cascada
+   * de YAML fusiona sin que el esquema duplique esa validacion.
+   */
+  servers: Record<string, unknown>;
+}
+
 export interface AlphaConfig {
   version: number;
   /** Modo confidencial: nada de nube. Es la fuente de verdad; se propaga a
@@ -62,6 +71,7 @@ export interface AlphaConfig {
   stt: SttConfig;
   conversation: ConversationConfig;
   brain: BrainConfig;
+  mcp: McpConfig;
   tts: TtsConfig;
 }
 
@@ -74,5 +84,6 @@ export const DEFAULT_CONFIG: AlphaConfig = {
   stt: { model: 'small', language: 'es' },
   conversation: { bargeIn: true, bargeInMinMs: 600 },
   brain: DEFAULT_BRAIN_CONFIG,
+  mcp: { servers: {} },
   tts: DEFAULT_TTS_CONFIG,
 };

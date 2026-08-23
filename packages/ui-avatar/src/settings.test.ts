@@ -1,6 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeSettings, DEFAULT_SETTINGS } from './settings.js';
+import { mkdtempSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {
+  mergeSettings,
+  loadSettings,
+  saveSettings,
+  loadPendiente,
+  savePendiente,
+  loadPendientesPerfil,
+  savePendientesPerfil,
+  DEFAULT_SETTINGS,
+} from './settings.js';
 import { AGENT_ORDER } from './agents.js';
 
 /**
@@ -48,4 +60,45 @@ test('micEnabled false se respeta (no se confunde con "ausente")', () => {
 
 test('el agente por defecto es uno de los que hay', () => {
   assert.ok(AGENT_ORDER.includes(DEFAULT_SETTINGS.agent));
+});
+
+/**
+ * El parche pendiente (un cambio hecho con el motor apagado) es una promesa
+ * de privacidad: tiene que sobrevivir a guardar los ajustes y a reiniciar la
+ * UI. Se prueba contra un ALPHA_HOME temporal para no pisar el de verdad.
+ */
+test('el parche pendiente sobrevive a guardar ajustes y a un reinicio', () => {
+  process.env['ALPHA_HOME'] = mkdtempSync(path.join(os.tmpdir(), 'alpha-ui-settings-'));
+  savePendiente({ micEnabled: false });
+  saveSettings({ agent: 'nexus', audioDevice: '', micEnabled: false });
+  assert.deepEqual(
+    loadPendiente(),
+    { micEnabled: false },
+    'guardar los ajustes no puede borrar la promesa sin entregar',
+  );
+  assert.equal(loadSettings().agent, 'nexus', 'y el parche no pisa los ajustes');
+  savePendiente(undefined);
+  assert.deepEqual(loadPendiente(), {}, 'entregado el parche, se limpia');
+});
+
+test('la cola de perfiles pendientes sobrevive al reinicio y se limpia', () => {
+  process.env['ALPHA_HOME'] = mkdtempSync(path.join(os.tmpdir(), 'alpha-ui-settings-'));
+  savePendientesPerfil([
+    { type: 'avatar-config', avatarId: 'vulpis', settings: { confidential: true } },
+  ]);
+  // Guardar los ajustes de presentacion no puede llevarse la cola por delante.
+  saveSettings({ agent: 'nexus', audioDevice: '', micEnabled: true });
+  assert.deepEqual(loadPendientesPerfil(), [
+    { type: 'avatar-config', avatarId: 'vulpis', settings: { confidential: true } },
+  ]);
+  savePendientesPerfil(undefined);
+  assert.deepEqual(loadPendientesPerfil(), []);
+});
+
+test('un parche corrupto en disco se descarta campo a campo', () => {
+  process.env['ALPHA_HOME'] = mkdtempSync(path.join(os.tmpdir(), 'alpha-ui-settings-'));
+  savePendiente({ micEnabled: false, agent: 'nexus' });
+  // Se relee saneado; los tipos equivocados no entran (mismo criterio que
+  // mergeSettings, pero sin defaults: lo que no vale, simplemente no esta).
+  assert.deepEqual(loadPendiente(), { micEnabled: false, agent: 'nexus' });
 });

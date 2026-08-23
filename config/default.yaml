@@ -65,6 +65,29 @@ brain:
       local: false
       models: [gemini-2.5-flash, gemini-2.5-pro]
 
+# Servidores MCP (Model Context Protocol): herramientas externas para el
+# cerebro. Sus tools entran al mismo registro que las builtin y las skills,
+# con nombre mcp_<id>__<tool>. Cada servidor declara `local`: el default es
+# false (= sus datos pueden salir de la maquina) y el modo confidencial
+# bloquea su uso — las tools ni se ensenan al modelo. Ejemplo, en local.yaml:
+#
+# mcp:
+#   servers:
+#     everything:                # id: da el prefijo mcp_everything__*
+#       transport: stdio
+#       command: npx             # en Windows, si el spawn de npx falla:
+#       args: ['-y', '@modelcontextprotocol/server-everything']
+#       #   command: cmd
+#       #   args: ['/c', 'npx', '-y', '@modelcontextprotocol/server-everything']
+#       local: false             # true SOLO si el servidor no saca datos del equipo
+#       # tools: [echo]          # allowlist opcional: menos esquemas, menos ruido
+#     docs:
+#       transport: http
+#       url: https://ejemplo.com/mcp
+#       # headers: { Authorization: 'Bearer ...' }   # mejor en local.yaml (ignorado por git)
+mcp:
+  servers: {}
+
 tts:
   engine: edge                     # edge (neuronal, online) | sapi (local Windows)
   edgeVoice: es-ES-AlvaroNeural

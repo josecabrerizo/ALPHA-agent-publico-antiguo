@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { alphaHomeDir } from '@alpha/protocol';
+import { alphaHomeDir, type AvatarConfigMessage } from '@alpha/protocol';
 import { DEFAULT_AGENT } from './agents.js';
 
 /**
@@ -68,10 +68,116 @@ export function loadSettings(): Settings {
 export function saveSettings(settings: Settings): void {
   try {
     const file = settingsPath();
+    // Guardar los ajustes de presentacion conserva el RESTO de claves del
+    // fichero (pendiente, pendientesPerfil): son promesas sin entregar y no
+    // pueden borrarse por repintar un boton.
+    const out: Record<string, unknown> = { ...readRaw(file), ...settings };
     mkdirSync(path.dirname(file), { recursive: true });
-    writeFileSync(file, JSON.stringify(settings, null, 2), 'utf8');
+    writeFileSync(file, JSON.stringify(out, null, 2), 'utf8');
   } catch (error) {
     // Que no se pueda guardar no debe tumbar el avatar; se avisa y se sigue.
     console.error('No se pudo guardar la configuracion:', (error as Error).message);
   }
+}
+
+/**
+ * Parche aun NO entregado al motor (p. ej. un mute hecho con el motor
+ * apagado). Se persiste junto a la cache para sobrevivir a un reinicio de la
+ * UI: es una promesa de privacidad y no puede evaporarse con el proceso —
+ * sin esto, el siguiente motor arrancaba capturando con la UI en silencio.
+ */
+export function loadPendiente(): Partial<Settings> {
+  try {
+    return sanitizePatch(readRaw(settingsPath())['pendiente']);
+  } catch {
+    return {};
+  }
+}
+
+/** Persiste (o limpia, con undefined) el parche pendiente SIN tocar el resto. */
+export function savePendiente(patch: Partial<Settings> | undefined): void {
+  try {
+    const file = settingsPath();
+    const raw = readRaw(file);
+    if (patch && Object.keys(patch).length > 0) raw['pendiente'] = patch;
+    else delete raw['pendiente'];
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify(raw, null, 2), 'utf8');
+  } catch (error) {
+    console.error('No se pudo guardar el parche pendiente:', (error as Error).message);
+  }
+}
+
+/**
+ * Cola de cambios de PERFIL (avatar-config) sin entregar. Mismo criterio que
+ * el parche pendiente: un "activa confidencial en este perfil" hecho con el
+ * motor caido es una promesa de privacidad y sobrevive al reinicio de la UI.
+ */
+export function loadPendientesPerfil(): AvatarConfigMessage[] {
+  try {
+    return sanitizePerfiles(readRaw(settingsPath())['pendientesPerfil']);
+  } catch {
+    return [];
+  }
+}
+
+export function savePendientesPerfil(list: AvatarConfigMessage[] | undefined): void {
+  try {
+    const file = settingsPath();
+    const raw = readRaw(file);
+    if (list && list.length > 0) raw['pendientesPerfil'] = list;
+    else delete raw['pendientesPerfil'];
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify(raw, null, 2), 'utf8');
+  } catch (error) {
+    console.error('No se pudo guardar la cola de perfiles:', (error as Error).message);
+  }
+}
+
+function sanitizePerfiles(v: unknown): AvatarConfigMessage[] {
+  if (!Array.isArray(v)) return [];
+  const out: AvatarConfigMessage[] = [];
+  for (const item of v) {
+    if (!item || typeof item !== 'object') continue;
+    const r = item as Record<string, unknown>;
+    if (r['type'] !== 'avatar-config' || typeof r['avatarId'] !== 'string') continue;
+    const s = (r['settings'] ?? {}) as Record<string, unknown>;
+    const settings: AvatarConfigMessage['settings'] = {};
+    if (typeof s['model'] === 'string') settings.model = s['model'];
+    if (typeof s['confidential'] === 'boolean') settings.confidential = s['confidential'];
+    if (typeof s['voiceId'] === 'string') settings.voiceId = s['voiceId'];
+    if (Object.keys(settings).length === 0) continue;
+    out.push({
+      type: 'avatar-config',
+      avatarId: r['avatarId'],
+      // El requestId sobrevive al reinicio: el veredicto puede llegar en la
+      // conexion siguiente a la que hizo la peticion.
+      ...(typeof r['requestId'] === 'string' ? { requestId: r['requestId'] } : {}),
+      settings,
+    });
+  }
+  return out;
+}
+
+function readRaw(file: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(file, 'utf8'));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // sin fichero o corrupto: se parte de cero
+  }
+  return {};
+}
+
+/** El parche leido del disco se valida campo a campo, como mergeSettings. */
+function sanitizePatch(v: unknown): Partial<Settings> {
+  if (!v || typeof v !== 'object') return {};
+  const r = v as Record<string, unknown>;
+  const out: Partial<Settings> = {};
+  if (typeof r['agent'] === 'string' && r['agent'].trim()) out.agent = r['agent'];
+  if (typeof r['audioDevice'] === 'string') out.audioDevice = r['audioDevice'];
+  if (typeof r['micEnabled'] === 'boolean') out.micEnabled = r['micEnabled'];
+  return out;
 }
