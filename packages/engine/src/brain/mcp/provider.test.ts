@@ -293,6 +293,31 @@ test('un resultado estructurado sin texto llega serializado, no "(sin resultado)
   }
 });
 
+test('con solo un marcador ([imagen]) el structuredContent acompana, no se suprime', async () => {
+  const server = new Server({ name: 'grafico', version: '1.0.0' }, { capabilities: { tools: {} } });
+  server.setRequestHandler(ListToolsRequestSchema, () => ({
+    tools: [{ name: 'grafica', description: 'x', inputSchema: { type: 'object' as const } }],
+  }));
+  server.setRequestHandler(CallToolRequestSchema, () => ({
+    content: [{ type: 'image', data: 'aWJt', mimeType: 'image/png' }],
+    structuredContent: { total: 7 },
+  }));
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const provider = await McpToolProvider.connect(cfg(), { transport: clientTransport });
+  try {
+    const result = await provider.tools()[0]!.run({}, { confidential: false });
+    assert.equal(
+      result,
+      `[imagen]\n${JSON.stringify({ total: 7 })}`,
+      'el marcador no es texto real: el JSON estructurado tiene que viajar igual',
+    );
+  } finally {
+    await provider.close();
+    await server.close();
+  }
+});
+
 test('si el arranque falla o expira, el transporte se cierra (sin hijos huerfanos)', async () => {
   // Solo la punta cliente del par: nadie contesta al otro lado y el connect
   // expira. Lo observable es el close del transporte, que es lo que mata al
