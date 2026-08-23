@@ -122,13 +122,21 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
   // caliente al entrar/salir del modo confidencial.
   const mcpConfigs = parseMcpServers(config.mcp.servers).servers;
   const mcpProviders: McpToolProvider[] = [];
+  // Que tools registro CADA provider: el des-registro va por dueño, no por
+  // nombre. Y una colision de nombres se OMITE en vez de pisar: si pisara,
+  // cerrar al que piso se llevaria la tool del otro (o hasta una builtin).
+  const mcpOwned = new Map<McpToolProvider, string[]>();
   const registerMcpTools = (provider: McpToolProvider): void => {
+    const owned: string[] = [];
     for (const tool of provider.tools()) {
-      // register() sobrescribe en silencio; una colision entre servidores (o
-      // con una builtin) merece decirse antes de pisar.
-      if (tools.has(tool.name)) log(`✗ [mcp] herramienta duplicada "${tool.name}": se sobrescribe`);
+      if (tools.has(tool.name)) {
+        log(`✗ [mcp] herramienta duplicada "${tool.name}": se omite (ya hay una con ese nombre)`);
+        continue;
+      }
       tools.register(tool);
+      owned.push(tool.name);
     }
+    mcpOwned.set(provider, owned);
   };
 
   // Toman los valores por parametro (no del cierre) para poder construir y
@@ -382,14 +390,25 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
      * tools: al entrar en confidencial se cierran y des-registran los
      * servidores no locales (un hijo stdio o una sesion http vivos pueden
      * seguir saliendo a la red aunque sus tools esten bloqueadas); al salir,
-     * se reconectan y re-registran.
+     * se reconectan y re-registran. La generacion invalida reconciliaciones
+     * RANCIAS: si el modo vuelve a cambiar durante una conexion lenta, lo
+     * conectado se descarta en vez de registrarse ya en confidencial.
      */
+    let mcpGeneration = 0;
     async function reconcileMcpProviders(nowConfidential: boolean): Promise<void> {
+      const generation = ++mcpGeneration;
       if (nowConfidential) {
-        for (const provider of [...mcpProviders]) {
-          if (provider.local) continue;
-          for (const tool of provider.tools()) tools.unregister(tool.name);
+        // Primero, SIN awaits: fuera del registro TODAS las tools remotas de
+        // golpe. El turno en curso sigue vivo (reconfigure no lo corta) y no
+        // puede despachar una tool remota mientras se cierra la primera.
+        const remotos = mcpProviders.filter((p) => !p.local);
+        for (const provider of remotos) {
+          for (const name of mcpOwned.get(provider) ?? []) tools.unregister(name);
+          mcpOwned.delete(provider);
           mcpProviders.splice(mcpProviders.indexOf(provider), 1);
+        }
+        // Despues, los cierres (pueden ser lentos; ya no queda nada registrado).
+        for (const provider of remotos) {
           await provider.close().catch(() => {});
           log(`mcp "${provider.id}" cerrado: modo confidencial`);
         }
@@ -400,6 +419,13 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
         if (!server.enabled || server.local || conectados.has(server.id)) continue;
         const provider = await connectMcpServer(server, log);
         if (!provider) continue;
+        // Reconciliacion rancia: mientras conectaba, el modo volvio a cambiar
+        // (o arranco otra reconciliacion). Se cierra sin registrar.
+        if (generation !== mcpGeneration || confidential) {
+          await provider.close().catch(() => {});
+          log(`mcp "${server.id}" descartado: el modo cambio mientras conectaba`);
+          continue;
+        }
         mcpProviders.push(provider);
         registerMcpTools(provider);
       }
