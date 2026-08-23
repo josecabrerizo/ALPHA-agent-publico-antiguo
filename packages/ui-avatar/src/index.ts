@@ -60,21 +60,32 @@ function coincidePerfil(perfil: AvatarOption, s: AvatarConfigMessage['settings']
 }
 
 /**
- * El mensaje `avatars` es el veredicto autoritativo sobre los perfiles: lo
- * pedido que ya se refleja queda confirmado, y lo ENTREGADO que no se refleja
- * es que el motor lo rechazo (su config-error ya se pinto) — tampoco se
- * reintiene para siempre. Solo sigue en cola lo que aun no pudo enviarse.
+ * Un `avatars` solo confirma lo que YA REFLEJA: el saludo del motor se encola
+ * antes de que le llegue el replay, asi que "entregado + avatars posterior"
+ * no vale como veredicto (borraria una peticion que el motor ni ha visto). El
+ * rechazo llega aparte, correlacionado: config-error con avatarId.
  */
 function confirmarPerfiles(list: AvatarOption[]): void {
   let cambio = false;
   for (let i = pendientesPerfil.length - 1; i >= 0; i--) {
-    const { message, entregado } = pendientesPerfil[i]!;
+    const { message } = pendientesPerfil[i]!;
     const perfil = list.find((a) => a.id === message.avatarId);
-    if (!perfil) continue;
-    if (coincidePerfil(perfil, message.settings) || entregado) {
-      pendientesPerfil.splice(i, 1);
-      cambio = true;
-    }
+    if (!perfil || !coincidePerfil(perfil, message.settings)) continue;
+    pendientesPerfil.splice(i, 1);
+    cambio = true;
+  }
+  if (cambio) persistirPerfiles();
+}
+
+/** Veredicto de RECHAZO correlacionado: fuera de la cola lo entregado de ese
+ *  avatar — el motor lo vio y dijo que no (el caption ya lo pinto). */
+function rechazarPerfiles(avatarId: string): void {
+  let cambio = false;
+  for (let i = pendientesPerfil.length - 1; i >= 0; i--) {
+    const p = pendientesPerfil[i]!;
+    if (p.message.avatarId !== avatarId || !p.entregado) continue;
+    pendientesPerfil.splice(i, 1);
+    cambio = true;
   }
   if (cambio) persistirPerfiles();
 }
@@ -161,6 +172,7 @@ const bridge = connectBridge((msg) => {
   } else if (msg.type === 'config-error') {
     log(`configuracion rechazada: ${msg.message}`);
     avatar.showCaption(`No se aplico: ${msg.message}`);
+    if (msg.avatarId !== undefined) rechazarPerfiles(msg.avatarId);
   }
 });
 (globalThis as Record<string, unknown>)['__alphaBridge'] = bridge;
