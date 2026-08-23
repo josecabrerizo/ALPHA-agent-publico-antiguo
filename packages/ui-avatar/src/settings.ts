@@ -147,7 +147,14 @@ function sanitizePerfiles(v: unknown): AvatarConfigMessage[] {
     if (typeof s['confidential'] === 'boolean') settings.confidential = s['confidential'];
     if (typeof s['voiceId'] === 'string') settings.voiceId = s['voiceId'];
     if (Object.keys(settings).length === 0) continue;
-    out.push({ type: 'avatar-config', avatarId: r['avatarId'], settings });
+    out.push({
+      type: 'avatar-config',
+      avatarId: r['avatarId'],
+      // El requestId sobrevive al reinicio: el veredicto puede llegar en la
+      // conexion siguiente a la que hizo la peticion.
+      ...(typeof r['requestId'] === 'string' ? { requestId: r['requestId'] } : {}),
+      settings,
+    });
   }
   return out;
 }

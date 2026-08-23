@@ -77,18 +77,29 @@ function confirmarPerfiles(list: AvatarOption[]): void {
   if (cambio) persistirPerfiles();
 }
 
-/** Veredicto de RECHAZO correlacionado: fuera de la cola lo entregado de ese
- *  avatar — el motor lo vio y dijo que no (el caption ya lo pinto). */
-function rechazarPerfiles(avatarId: string): void {
+/**
+ * Veredicto de RECHAZO correlacionado. Con requestId cae sobre UNA peticion
+ * (dos ediciones del mismo perfil en vuelo no se arrastran entre si); sin el
+ * (motor anterior), sobre lo entregado de ese avatar.
+ */
+function rechazarPerfiles(avatarId: string, requestId?: string): void {
   let cambio = false;
   for (let i = pendientesPerfil.length - 1; i >= 0; i--) {
     const p = pendientesPerfil[i]!;
-    if (p.message.avatarId !== avatarId || !p.entregado) continue;
+    if (requestId !== undefined) {
+      if (p.message.requestId !== requestId) continue;
+    } else if (p.message.avatarId !== avatarId || !p.entregado) {
+      continue;
+    }
     pendientesPerfil.splice(i, 1);
     cambio = true;
   }
   if (cambio) persistirPerfiles();
 }
+
+/** Identificador unico de cada peticion de perfil, para su veredicto. */
+let secuenciaPeticion = 0;
+const nuevoRequestId = (): string => `p${Date.now().toString(36)}-${++secuenciaPeticion}`;
 
 // Conexion con el motor: refleja el estado de la conversacion en el orbe y
 // muestra el ultimo texto. Si el motor no esta, reintenta hasta que aparezca.
@@ -121,8 +132,12 @@ const bridge = connectBridge((msg) => {
         log(`config pendiente → motor: ${JSON.stringify(pendiente)}`);
       }
     }
+    // Conexion nueva, entregas viejas a cero: lo enviado en la conexion
+    // anterior sin veredicto (el motor cayo con ello en el buffer) debe
+    // reintentarse — el reenvio es idempotente y el motor revalida.
+    for (const p of pendientesPerfil) p.entregado = false;
     for (const p of pendientesPerfil) {
-      if (!p.entregado && bridge.send(p.message)) {
+      if (bridge.send(p.message)) {
         p.entregado = true;
         log(`perfil pendiente → motor: avatar=${p.message.avatarId}`);
       }
@@ -172,7 +187,7 @@ const bridge = connectBridge((msg) => {
   } else if (msg.type === 'config-error') {
     log(`configuracion rechazada: ${msg.message}`);
     avatar.showCaption(`No se aplico: ${msg.message}`);
-    if (msg.avatarId !== undefined) rechazarPerfiles(msg.avatarId);
+    if (msg.avatarId !== undefined) rechazarPerfiles(msg.avatarId, msg.requestId);
   }
 });
 (globalThis as Record<string, unknown>)['__alphaBridge'] = bridge;
@@ -194,9 +209,11 @@ avatar.setOnSettingsChanged((patch) => {
   }
 });
 
-avatar.setOnAvatarSettingsChanged((message) => {
+avatar.setOnAvatarSettingsChanged((original) => {
   // Mismo contrato que la config: en cola (memoria y disco) hasta el veredicto
-  // autoritativo del mensaje avatars; y el log dice la verdad en ambos casos.
+  // autoritativo (avatars que refleje, o config-error correlacionado por el
+  // requestId que se acuna aqui); y el log dice la verdad en ambos casos.
+  const message: AvatarConfigMessage = { ...original, requestId: nuevoRequestId() };
   const entrada: PerfilPendiente = { message, entregado: false };
   pendientesPerfil.push(entrada);
   persistirPerfiles();

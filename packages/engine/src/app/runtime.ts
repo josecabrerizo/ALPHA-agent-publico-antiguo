@@ -201,11 +201,12 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
     // microfono cerrado, se arranca cerrado (y el indicador del sistema, apagado).
     if (!config.audio.micEnabled) session.setMicEnabled(false);
 
-    // Mute aplicado en vivo pero SIN persistir (el disco fallo): mientras este
-    // flag este alto, el saludo no confirma el micro — confirmar en falso
-    // haria a la UI soltar su pendiente y el proximo arranque capturaria con
-    // el ajuste viejo.
+    // Ajustes aplicados en vivo pero SIN persistir (el disco fallo): mientras
+    // un flag este alto, el saludo no confirma ese valor — confirmar en falso
+    // haria a la UI soltar su pendiente y el proximo arranque volveria al
+    // ajuste viejo (en el caso del mute, capturando).
     let micSinPersistir = false;
+    let deviceSinPersistir = false;
 
     // Manda al avatar la lista de microfonos disponibles (al arrancar y cada vez
     // que un avatar se conecta), marcando el activo.
@@ -215,7 +216,13 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
           name: d.name,
           isDefault: d.isDefault,
         }));
-        bridge.broadcast({ type: 'devices', inputs, current: currentMic });
+        // Sin current mientras el dispositivo siga sin persistir: current es
+        // la CONFIRMACION del cambio para la UI, y la lista viaja igual.
+        bridge.broadcast({
+          type: 'devices',
+          inputs,
+          ...(deviceSinPersistir ? {} : { current: currentMic }),
+        });
       } catch (err) {
         log(`✗ [devices] ${(err as Error).message}`);
       }
@@ -286,6 +293,11 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
       if (!micSinPersistir) {
         bridge.broadcast({ type: 'mic', enabled: session.isMicEnabled() });
       }
+      // Mismo contrato para el dispositivo: reintentar y, si sigue sin
+      // guardarse, sendDevices omitira el current que lo confirmaria.
+      if (deviceSinPersistir && saveLiveSettings({ audioDevice: currentMic })) {
+        deviceSinPersistir = false;
+      }
       void sendDevices();
       sendAvatars();
       sendModels();
@@ -320,10 +332,15 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
       applyAvatarConfig(msg).catch((err: unknown) => {
         const message = (err as Error).message;
         log(`✗ [avatar-config] ${message}`);
-        // Con avatarId: es el veredicto CORRELACIONADO que permite a la UI
-        // sacar de su cola la peticion rechazada (sin el, reintentaria para
-        // siempre un cambio que el motor va a rechazar igual).
-        bridge.broadcast({ type: 'config-error', message, avatarId: msg.avatarId });
+        // Con avatarId Y requestId: el veredicto CORRELACIONADO cae sobre UNA
+        // peticion de la cola de la UI (solo avatarId borraria a las hermanas
+        // del mismo perfil que aun no tienen veredicto).
+        bridge.broadcast({
+          type: 'config-error',
+          message,
+          avatarId: msg.avatarId,
+          ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
+        });
         // Confirmacion autoritativa: ante un rechazo la UI vuelve a pintar lo que
         // de verdad sigue guardado y no conserva una seleccion optimista.
         sendAvatars();
@@ -357,8 +374,10 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
         currentMic = s.audioDevice;
         session.setAudioDevice(s.audioDevice);
         if (saveLiveSettings({ audioDevice: s.audioDevice })) {
+          deviceSinPersistir = false;
           void sendDevices();
         } else {
+          deviceSinPersistir = true;
           log(`no se pudo guardar alpha.settings.json; el microfono queda sin confirmar`);
         }
         log(`⚙️  microfono desde el avatar: ${s.audioDevice}`);
