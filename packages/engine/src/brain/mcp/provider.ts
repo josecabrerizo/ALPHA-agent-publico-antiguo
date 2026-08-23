@@ -69,6 +69,11 @@ export class McpToolProvider {
     return this.cfg.id;
   }
 
+  /** El contrato de privacidad del servidor, para poder reconciliar en caliente. */
+  get local(): boolean {
+    return this.cfg.local;
+  }
+
   tools(): Tool[] {
     return this.adapted;
   }
@@ -79,9 +84,29 @@ export class McpToolProvider {
 }
 
 /**
+ * Conecta UN servidor, tolerante: un fallo se dice y devuelve undefined (el
+ * mismo trato que una skill en cuarentena). Lo usa el arranque y tambien la
+ * reconciliacion en caliente al salir del modo confidencial.
+ */
+export async function connectMcpServer(
+  s: McpServerConfig,
+  log: (message: string) => void,
+): Promise<McpToolProvider | undefined> {
+  try {
+    const provider = await McpToolProvider.connect(s);
+    log(
+      `mcp "${s.id}": ${provider.tools().length} tools${s.local ? ' (local)' : ' (no local: bloqueado en confidencial)'}`,
+    );
+    return provider;
+  } catch (err) {
+    log(`✗ [mcp] "${s.id}" no disponible: ${(err as Error).message}`);
+    return undefined;
+  }
+}
+
+/**
  * Conecta todos los servidores declarados, en paralelo y tolerante: uno caido
- * se avisa y se omite (el mismo trato que una skill en cuarentena), nunca
- * tumba el arranque del motor.
+ * se avisa y se omite, nunca tumba el arranque del motor.
  */
 export async function connectMcpProviders(
   raw: unknown,
@@ -97,24 +122,16 @@ export async function connectMcpProviders(
       .map(async (s) => {
         // En confidencial, un servidor no local NI SE CONECTA: el propio
         // handshake ya manda cabeceras (http) o arranca un proceso que puede
-        // salir a la red (stdio). Filtrar solo las tools no bastaba.
+        // salir a la red (stdio). Filtrar solo las tools no bastaba. Al salir
+        // del modo confidencial, la reconciliacion en caliente lo conecta.
         if (opts.confidential && !s.local) {
           log(
             `mcp "${s.id}" omitido: modo confidencial y el servidor no es local; ` +
-              `arranca sin confidencial para usarlo`,
+              `se conectara si sales del modo confidencial`,
           );
           return undefined;
         }
-        try {
-          const provider = await McpToolProvider.connect(s);
-          log(
-            `mcp "${s.id}": ${provider.tools().length} tools${s.local ? ' (local)' : ' (no local: bloqueado en confidencial)'}`,
-          );
-          return provider;
-        } catch (err) {
-          log(`✗ [mcp] "${s.id}" no disponible: ${(err as Error).message}`);
-          return undefined;
-        }
+        return connectMcpServer(s, log);
       }),
   );
   return results.filter((p): p is McpToolProvider => p !== undefined);
