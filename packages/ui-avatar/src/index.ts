@@ -60,19 +60,32 @@ function coincidePerfil(perfil: AvatarOption, s: AvatarConfigMessage['settings']
 }
 
 /**
- * Un `avatars` solo confirma lo que YA REFLEJA: el saludo del motor se encola
- * antes de que le llegue el replay, asi que "entregado + avatars posterior"
- * no vale como veredicto (borraria una peticion que el motor ni ha visto). El
- * rechazo llega aparte, correlacionado: config-error con avatarId.
+ * Un `avatars` solo confirma lo que YA REFLEJA, y solo en ORDEN: por cada
+ * avatar, unicamente su PRIMERA peticion en cola es elegible en cada
+ * difusion. Con dos ediciones conflictivas ([off, on] sobre un perfil que ya
+ * estaba on), el saludo rancio coincidiria con la posterior y la borraria sin
+ * que el motor la hubiera visto; en orden, cada una espera su turno. El
+ * rechazo llega aparte, correlacionado (config-error con avatarId/requestId).
  */
 function confirmarPerfiles(list: AvatarOption[]): void {
   let cambio = false;
-  for (let i = pendientesPerfil.length - 1; i >= 0; i--) {
+  const vistos = new Set<string>();
+  for (let i = 0; i < pendientesPerfil.length;) {
     const { message } = pendientesPerfil[i]!;
+    if (vistos.has(message.avatarId)) {
+      i++;
+      continue;
+    }
+    vistos.add(message.avatarId);
     const perfil = list.find((a) => a.id === message.avatarId);
-    if (!perfil || !coincidePerfil(perfil, message.settings)) continue;
-    pendientesPerfil.splice(i, 1);
-    cambio = true;
+    if (perfil && coincidePerfil(perfil, message.settings)) {
+      pendientesPerfil.splice(i, 1);
+      cambio = true;
+      // No se incrementa i: el splice ya corrio la lista, y `vistos` impide
+      // que una segunda peticion del mismo avatar entre en esta pasada.
+    } else {
+      i++;
+    }
   }
   if (cambio) persistirPerfiles();
 }
@@ -83,18 +96,18 @@ function confirmarPerfiles(list: AvatarOption[]): void {
  * (motor anterior), sobre lo entregado de ese avatar.
  */
 function rechazarPerfiles(avatarId: string, requestId?: string): void {
-  let cambio = false;
-  for (let i = pendientesPerfil.length - 1; i >= 0; i--) {
-    const p = pendientesPerfil[i]!;
-    if (requestId !== undefined) {
-      if (p.message.requestId !== requestId) continue;
-    } else if (p.message.avatarId !== avatarId || !p.entregado) {
-      continue;
-    }
-    pendientesPerfil.splice(i, 1);
-    cambio = true;
+  let indice = -1;
+  if (requestId !== undefined) {
+    indice = pendientesPerfil.findIndex((p) => p.message.requestId === requestId);
+  } else {
+    // Motor anterior sin requestId: como mucho UNA — la mas antigua entregada
+    // de ese avatar, que es a la que puede referirse el rechazo. Llevarse a
+    // las hermanas borraria peticiones que el motor aun no ha leido.
+    indice = pendientesPerfil.findIndex((p) => p.message.avatarId === avatarId && p.entregado);
   }
-  if (cambio) persistirPerfiles();
+  if (indice < 0) return;
+  pendientesPerfil.splice(indice, 1);
+  persistirPerfiles();
 }
 
 /** Identificador unico de cada peticion de perfil, para su veredicto. */
@@ -188,6 +201,19 @@ const bridge = connectBridge((msg) => {
     log(`configuracion rechazada: ${msg.message}`);
     avatar.showCaption(`No se aplico: ${msg.message}`);
     if (msg.avatarId !== undefined) rechazarPerfiles(msg.avatarId, msg.requestId);
+    // Eco de campos rechazados: veredicto para el parche de config — sin el,
+    // un agente desconocido (o el micro contra la fachada, que no captura) se
+    // reintentaria en cada reconexion para siempre.
+    if (msg.settings) {
+      let cambio = false;
+      for (const campo of ['agent', 'audioDevice', 'micEnabled'] as const) {
+        if (msg.settings[campo] !== undefined && pendiente[campo] !== undefined) {
+          delete pendiente[campo];
+          cambio = true;
+        }
+      }
+      if (cambio) savePendiente(Object.keys(pendiente).length > 0 ? pendiente : undefined);
+    }
   }
 });
 (globalThis as Record<string, unknown>)['__alphaBridge'] = bridge;
