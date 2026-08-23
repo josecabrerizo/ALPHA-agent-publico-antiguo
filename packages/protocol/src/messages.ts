@@ -87,7 +87,12 @@ export type EngineToAvatarMessage =
   | { type: 'avatars'; list: AvatarOption[]; current?: string }
   | { type: 'voices'; list: VoiceOption[] }
   | { type: 'models'; list: ModelOption[] }
-  | { type: 'config-error'; message: string };
+  /**
+   * Rechazo de un cambio. Con avatarId cuando rechaza un avatar-config: es lo
+   * que permite a la UI correlacionar el veredicto con SU peticion en cola
+   * (un rechazo sin correlacion la dejaria reintentando para siempre).
+   */
+  | { type: 'config-error'; message: string; avatarId?: string };
 
 /** Avatar -> motor: handshake. El token sale del fichero que deja el motor. */
 export interface AuthMessage {

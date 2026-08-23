@@ -201,12 +201,11 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
     // microfono cerrado, se arranca cerrado (y el indicador del sistema, apagado).
     if (!config.audio.micEnabled) session.setMicEnabled(false);
 
-    // Persistencia de los ajustes en vivo: el MOTOR es el unico que escribe el
-    // fichero (la UI solo manda el cambio por el puente). No poder guardarlo se
-    // avisa y se sigue: el ajuste ya esta aplicado.
-    const persist = (patch: Parameters<typeof saveLiveSettings>[0]): void => {
-      if (!saveLiveSettings(patch)) log(`no se pudo guardar alpha.settings.json`);
-    };
+    // Mute aplicado en vivo pero SIN persistir (el disco fallo): mientras este
+    // flag este alto, el saludo no confirma el micro — confirmar en falso
+    // haria a la UI soltar su pendiente y el proximo arranque capturaria con
+    // el ajuste viejo.
+    let micSinPersistir = false;
 
     // Manda al avatar la lista de microfonos disponibles (al arrancar y cada vez
     // que un avatar se conecta), marcando el activo.
@@ -277,9 +276,16 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
 
     /** Todo lo que hay que mandarle a un avatar recien autenticado. */
     async function greetClient(): Promise<void> {
-      // El estado real del micro, lo primero: es una promesa de privacidad y
-      // la cache de la UI puede venir de otro arranque (o de otro checkout).
-      bridge.broadcast({ type: 'mic', enabled: session.isMicEnabled() });
+      // El micro, lo primero: es una promesa de privacidad y la cache de la
+      // UI puede venir de otro arranque. Pero el saludo solo confirma lo
+      // PERSISTIDO: si un guardado anterior fallo, se reintenta aqui y, si
+      // sigue fallando, no se emite — la UI conserva su pendiente.
+      if (micSinPersistir && saveLiveSettings({ micEnabled: session.isMicEnabled() })) {
+        micSinPersistir = false;
+      }
+      if (!micSinPersistir) {
+        bridge.broadcast({ type: 'mic', enabled: session.isMicEnabled() });
+      }
       void sendDevices();
       sendAvatars();
       sendModels();
@@ -314,7 +320,10 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
       applyAvatarConfig(msg).catch((err: unknown) => {
         const message = (err as Error).message;
         log(`✗ [avatar-config] ${message}`);
-        bridge.broadcast({ type: 'config-error', message });
+        // Con avatarId: es el veredicto CORRELACIONADO que permite a la UI
+        // sacar de su cola la peticion rechazada (sin el, reintentaria para
+        // siempre un cambio que el motor va a rechazar igual).
+        bridge.broadcast({ type: 'config-error', message, avatarId: msg.avatarId });
         // Confirmacion autoritativa: ante un rechazo la UI vuelve a pintar lo que
         // de verdad sigue guardado y no conserva una seleccion optimista.
         sendAvatars();
@@ -332,8 +341,10 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
       if (typeof s.micEnabled === 'boolean' && s.micEnabled !== session.isMicEnabled()) {
         session.setMicEnabled(s.micEnabled);
         if (saveLiveSettings({ micEnabled: s.micEnabled })) {
+          micSinPersistir = false;
           bridge.broadcast({ type: 'mic', enabled: s.micEnabled });
         } else {
+          micSinPersistir = true;
           log(`no se pudo guardar alpha.settings.json; el mute queda sin confirmar`);
         }
       }
@@ -356,8 +367,22 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
       if (!s.agent || s.agent === avatar?.id) return;
       const nextAvatar = avatarById(s.agent);
       if (!nextAvatar) throw new Error(`avatar desconocido: "${s.agent}"`);
+      // Validar ANTES de persistir (describe lanza con modelo o clave malos) y
+      // persistir ANTES de activar: activateAvatar difunde el avatars que
+      // CONFIRMA a la UI, y confirmar sin guardar perderia la seleccion en el
+      // proximo arranque — quiza volviendo de un perfil confidencial a uno de
+      // nube. Si el disco falla, se lanza: el catch pinta config-error y
+      // redifunde el estado real, y la UI conserva su pendiente.
+      makeBrain(
+        process.env['ALPHA_MODEL'] ?? nextAvatar.model,
+        confidentialForced || nextAvatar.confidential,
+        nextAvatar,
+      ).describe();
+      makeSpeaker(confidentialForced || nextAvatar.confidential, nextAvatar).describe();
+      if (!saveLiveSettings({ agent: nextAvatar.id })) {
+        throw new Error('no se pudo guardar la seleccion de avatar (alpha.settings.json)');
+      }
       activateAvatar(nextAvatar);
-      persist({ agent: nextAvatar.id });
     }
 
     /** Valida y activa un perfil completo: sus tres opciones viajan juntas. */
