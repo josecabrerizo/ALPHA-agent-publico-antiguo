@@ -88,11 +88,12 @@ export type EngineToAvatarMessage =
   | { type: 'voices'; list: VoiceOption[] }
   | { type: 'models'; list: ModelOption[] }
   /**
-   * Rechazo de un cambio. Con avatarId cuando rechaza un avatar-config: es lo
-   * que permite a la UI correlacionar el veredicto con SU peticion en cola
-   * (un rechazo sin correlacion la dejaria reintentando para siempre).
+   * Rechazo de un cambio. Con avatarId (y el requestId de la peticion, si
+   * viajo) cuando rechaza un avatar-config: es lo que permite a la UI
+   * correlacionar el veredicto con SU peticion en cola — sin correlacion
+   * reintentaria para siempre, y solo con avatarId borraria las hermanas.
    */
-  | { type: 'config-error'; message: string; avatarId?: string };
+  | { type: 'config-error'; message: string; avatarId?: string; requestId?: string };
 
 /** Avatar -> motor: handshake. El token sale del fichero que deja el motor. */
 export interface AuthMessage {
@@ -117,6 +118,13 @@ export interface ConfigMessage {
 export interface AvatarConfigMessage {
   type: 'avatar-config';
   avatarId: string;
+  /**
+   * Identificador de ESTA peticion, generado por el cliente. El rechazo lo
+   * devuelve (config-error.requestId) para que el veredicto caiga sobre una
+   * sola peticion: correlacionar solo por avatarId borraria de la cola las
+   * peticiones hermanas del mismo perfil aun sin veredicto.
+   */
+  requestId?: string;
   settings: {
     model?: string;
     confidential?: boolean;

@@ -175,6 +175,11 @@ export class AvatarBridge {
         const message: AvatarConfigMessage = {
           type: 'avatar-config',
           avatarId: m['avatarId'],
+          // El requestId del cliente viaja tal cual (saneado): el motor lo
+          // devuelve en el config-error para correlacionar el rechazo.
+          ...(typeof m['requestId'] === 'string'
+            ? { requestId: m['requestId'].slice(0, MAX_FIELD) }
+            : {}),
           settings,
         };
         for (const h of this.onAvatarConfig) h(message);
