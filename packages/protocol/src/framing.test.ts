@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { takeLines, tokenFileFor } from './bridge-client.js';
+import { takeLines } from './framing.js';
 
 /**
  * El puente manda un JSON por linea sobre TCP, y TCP no respeta los limites de
@@ -56,18 +56,4 @@ test('sin salto de linea no sale nada todavia', () => {
   const { lines, rest } = takeLines('{"a":1}');
   assert.deepEqual(lines, []);
   assert.equal(rest, '{"a":1}', 'un mensaje sin cerrar no puede darse por completo');
-});
-
-/**
- * Un fichero de token por puerto: si dos instancias lo compartieran, la segunda
- * invalidaria la autenticacion de la primera. El nombre tiene que coincidir con
- * el que escribe el motor (bridgeTokenPathFor).
- */
-test('el puerto por defecto conserva el nombre de siempre', () => {
-  assert.equal(tokenFileFor(43117), 'alpha.bridge-token');
-});
-
-test('otro puerto, otro fichero', () => {
-  assert.equal(tokenFileFor(43118), 'alpha.bridge-token.43118');
-  assert.notEqual(tokenFileFor(43118), tokenFileFor(43117));
 });

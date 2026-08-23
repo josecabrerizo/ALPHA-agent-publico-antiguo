@@ -2,123 +2,38 @@ import net from 'node:net';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import type { ConversationState } from './session.js';
-import { repoRoot } from '../paths.js';
+import {
+  AVATAR_BRIDGE_PORT,
+  MAX_FIELD,
+  MAX_LINE,
+  MAX_TEXT,
+  bridgeTokenPathFor,
+} from './constants.js';
+import {
+  PROTOCOL_VERSION,
+  type AvatarConfigMessage,
+  type ConfigMessage,
+  type EngineToAvatarMessage,
+} from './messages.js';
 
 /**
- * Puente motor <-> avatar. Los dos son procesos Node separados (el motor con
- * tsx, el avatar con qode), asi que se hablan por un socket TCP local con un
- * mensaje JSON por linea. Sin dependencias ni WebSocket.
+ * Puente motor <-> avatar, lado servidor. Los dos son procesos Node separados
+ * (el motor con tsx, el avatar con qode), asi que se hablan por un socket TCP
+ * local con un mensaje JSON por linea. Sin dependencias ni WebSocket.
  *
  * Endurecido: escucha solo en 127.0.0.1, pero cualquier proceso del equipo
  * podria conectar. Por eso exige un TOKEN de sesion (handshake) antes de
  * aceptar comandos o recibir datos, valida cada mensaje y limita su tamano.
+ *
+ * Vive en @alpha/protocol y no en el motor: quien quiera dar de comer al
+ * avatar (el motor, o una fachada como avatar-mcp) levanta un AvatarBridge y
+ * el avatar se conecta sin saber quien hay detras.
  */
-
-/** Puerto fijo en localhost. Alto y poco comun para no chocar. */
-export const AVATAR_BRIDGE_PORT = 43117;
-
-/**
- * Fichero donde el motor deja el token para que el avatar lo lea. Va ATADO AL
- * PUERTO: dos instancias en la misma maquina escuchan en puertos distintos, y
- * si compartieran fichero la segunda invalidaria la autenticacion de la
- * primera (el avatar releeria el token nuevo y el motor viejo lo rechazaria).
- * El puerto por defecto conserva el nombre de siempre.
- */
-export function bridgeTokenPathFor(port: number = AVATAR_BRIDGE_PORT): string {
-  const suffix = port === AVATAR_BRIDGE_PORT ? '' : `.${port}`;
-  return path.join(repoRoot, 'config', `alpha.bridge-token${suffix}`);
-}
-
-/** Fichero del puerto por defecto. */
-export const bridgeTokenPath = bridgeTokenPathFor();
-
-/** Tope de una linea sin salto: por encima, la conexion es basura y se corta. */
-const MAX_LINE = 64 * 1024;
-/** Tope de un mensaje escrito. */
-const MAX_TEXT = 8_000;
-/** Tope de los valores de config (nombres de modelo/dispositivo). */
-const MAX_FIELD = 256;
-
-/** Un perfil de avatar, tal como lo necesita la UI para pintar su menu. */
-export interface AvatarOption {
-  id: string;
-  name: string;
-  role: string;
-  /** Modelo, voz y privacidad pertenecen al perfil, no a la UI global. */
-  model: string;
-  confidential: boolean;
-  voice: { engine: 'sapi' | 'edge'; name: string; rate: number };
-  /** Ruta absoluta de la imagen (mismo equipo, otro proceso). */
-  image: string;
-}
-
-/** Modelo que el motor puede resolver y ofrecer en el menu. */
-export interface ModelOption {
-  ref: string;
-  label: string;
-  local: boolean;
-}
-
-/** Voz disponible para elegir en el avatar. */
-export interface VoiceOption {
-  /** Identificador único: engine:name. */
-  id: string;
-  /** Nombre para mostrar. */
-  name: string;
-  /** Motort: 'sapi' = local, 'edge' = nube de Microsoft. */
-  engine: 'sapi' | 'edge';
-  /** true = solo recursos de la máquina; false = necesita internet. */
-  local: boolean;
-}
-
-/** Motor -> avatar: estado, texto, microfonos, voces y perfiles de avatar. */
-export type AvatarMessage =
-  /** Acuse del handshake: hasta recibirlo, el avatar no esta autenticado. */
-  | { type: 'ready' }
-  | { type: 'state'; state: ConversationState | 'reposo' }
-  | { type: 'user'; text: string }
-  | { type: 'assistant'; text: string }
-  | { type: 'devices'; inputs: { name: string; isDefault: boolean }[]; current?: string }
-  | { type: 'avatars'; list: AvatarOption[]; current?: string }
-  | { type: 'voices'; list: VoiceOption[] }
-  | { type: 'models'; list: ModelOption[] }
-  | { type: 'config-error'; message: string };
-
-/** Avatar -> motor: cambios de configuracion desde el menu. */
-export interface AlphaConfigMessage {
-  type: 'config';
-  settings: {
-    agent?: string;
-    audioDevice?: string;
-    /** false = microfono silenciado (se cierra la captura). */
-    micEnabled?: boolean;
-  };
-}
-
-/** Cambia y persiste opciones que pertenecen a un perfil de avatars.yaml. */
-export interface AvatarConfigMessage {
-  type: 'avatar-config';
-  avatarId: string;
-  settings: {
-    model?: string;
-    confidential?: boolean;
-    /** Voz del perfil: "sapi:..." o "edge:...". */
-    voiceId?: string;
-  };
-}
-
-/** Avatar -> motor: mensaje escrito (chat de texto). */
-export interface AlphaTextMessage {
-  type: 'text-input';
-  text: string;
-}
-
 export class AvatarBridge {
   private server: net.Server | undefined;
   /** Solo los clientes autenticados; reciben datos y pueden mandar comandos. */
   private readonly authed = new Set<net.Socket>();
-  private readonly onConfig: ((msg: AlphaConfigMessage) => void)[] = [];
+  private readonly onConfig: ((msg: ConfigMessage) => void)[] = [];
   private readonly onAvatarConfig: ((msg: AvatarConfigMessage) => void)[] = [];
   private readonly onText: ((text: string) => void)[] = [];
   private readonly onConnect: (() => void)[] = [];
@@ -127,7 +42,7 @@ export class AvatarBridge {
   /** Puerto configurable para poder aislar los tests del puerto real. */
   constructor(private readonly port: number = AVATAR_BRIDGE_PORT) {}
 
-  onConfigMessage(handler: (msg: AlphaConfigMessage) => void): void {
+  onConfigMessage(handler: (msg: ConfigMessage) => void): void {
     this.onConfig.push(handler);
   }
   onTextInput(handler: (text: string) => void): void {
@@ -225,9 +140,23 @@ export class AvatarBridge {
     if (!this.authed.has(socket)) {
       if (m['type'] === 'auth' && typeof m['token'] === 'string' && this.tokenMatches(m['token'])) {
         this.authed.add(socket);
+        // El desajuste de version se avisa TAMBIEN en este lado: un avatar mas
+        // viejo que el motor no manda version (o manda otra) y no sabria leer
+        // la que viaja en el ready — el warn del cliente solo cubre el
+        // despliegue inverso. Versiones dispares no cortan nada (los mensajes
+        // desconocidos se ignoran), pero un desajuste mudo es indepurable.
+        const clientVersion = m['version'];
+        if (clientVersion !== PROTOCOL_VERSION)
+          console.warn(
+            `[puente] protocolo del avatar ${
+              typeof clientVersion === 'number' ? `v${clientVersion}` : 'sin version'
+            } != v${PROTOCOL_VERSION} del motor; conviene actualizar ambos lados`,
+          );
         // Acuse explicito: sin el, la UI no puede distinguir "socket abierto"
-        // de "motor escuchandome", y daba por enviado lo que se tiraba.
-        if (socket.writable) socket.write(JSON.stringify({ type: 'ready' }) + '\n');
+        // de "motor escuchandome", y daba por enviado lo que se tiraba. Lleva
+        // la version del protocolo para delatar un motor y un avatar dispares.
+        if (socket.writable)
+          socket.write(JSON.stringify({ type: 'ready', version: PROTOCOL_VERSION }) + '\n');
         for (const h of this.onConnect) h();
       }
       return;
@@ -268,7 +197,7 @@ export class AvatarBridge {
     return diff === 0;
   }
 
-  broadcast(message: AvatarMessage): void {
+  broadcast(message: EngineToAvatarMessage): void {
     const line = JSON.stringify(message) + '\n';
     for (const socket of this.authed) {
       if (socket.writable) socket.write(line);
@@ -294,10 +223,10 @@ export class AvatarBridge {
 }
 
 /** Valida y recorta la config entrante; descarta lo que no cuadre. */
-function sanitizeSettings(value: unknown): AlphaConfigMessage['settings'] | undefined {
+function sanitizeSettings(value: unknown): ConfigMessage['settings'] | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const v = value as Record<string, unknown>;
-  const out: AlphaConfigMessage['settings'] = {};
+  const out: ConfigMessage['settings'] = {};
   if (typeof v['agent'] === 'string') out.agent = v['agent'].slice(0, MAX_FIELD);
   if (typeof v['audioDevice'] === 'string') out.audioDevice = v['audioDevice'].slice(0, MAX_FIELD);
   if (typeof v['micEnabled'] === 'boolean') out.micEnabled = v['micEnabled'];

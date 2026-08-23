@@ -42,6 +42,7 @@ export default tseslint.config(
     languageOptions: {
       parserOptions: {
         project: [
+          './packages/protocol/tsconfig.check.json',
           './packages/engine/tsconfig.check.json',
           './packages/ui-avatar/tsconfig.check.json',
         ],

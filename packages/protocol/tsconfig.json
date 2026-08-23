@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Este paquete lo consumen DOS mundos: el motor (ESM sobre tsx) y el
+    // avatar (CommonJS sobre qode, con resolucion node10 que solo lee
+    // main/types). Se compila solo a CommonJS: ESM lo importa sin friccion
+    // y node10 no sabria leer un campo exports de doble formato.
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "verbatimModuleSyntax": false,
+    "esModuleInterop": true,
+    "rootDir": "./src",
+    "outDir": "./dist"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}

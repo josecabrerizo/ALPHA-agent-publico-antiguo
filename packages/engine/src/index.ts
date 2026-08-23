@@ -1,9 +1,30 @@
 /**
  * Superficie publica del motor de A.L.P.H.A.
  *
- * De momento solo la cadena audio→texto. El servidor IPC que consumira la UI
- * del avatar entra cuando exista algo que servir mas alla de transcripciones.
+ * La cadena audio→texto→cerebro→voz, mas el puente con el avatar, que se
+ * re-exporta desde @alpha/protocol (alli vive el protocolo completo).
  */
+export {
+  AvatarBridge,
+  connectBridge,
+  AVATAR_BRIDGE_PORT,
+  PROTOCOL_VERSION,
+  alphaHomeDir,
+  bridgeTokenPathFor,
+} from '@alpha/protocol';
+export type {
+  EngineToAvatarMessage,
+  AvatarToEngineMessage,
+  AuthMessage,
+  ConfigMessage,
+  AvatarConfigMessage,
+  TextInputMessage,
+  AvatarOption,
+  ModelOption,
+  VoiceOption,
+  AvatarWireState,
+  BridgeHandle,
+} from '@alpha/protocol';
 export { captureMicrophone, type CaptureHandle, type CaptureOptions } from './audio/capture.js';
 export { captureSystemAudio, listOutputDevices, type LoopbackOptions } from './audio/loopback.js';
 export { listInputDevices, defaultInputDevice, type AudioDevice } from './audio/devices.js';
