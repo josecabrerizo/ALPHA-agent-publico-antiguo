@@ -202,6 +202,24 @@ test('tools/list paginado: se siguen los nextCursor hasta agotar', async () => {
   }
 });
 
+test('si el arranque falla o expira, el transporte se cierra (sin hijos huerfanos)', async () => {
+  // Solo la punta cliente del par: nadie contesta al otro lado y el connect
+  // expira. Lo observable es el close del transporte, que es lo que mata al
+  // proceso hijo cuando el transporte es stdio de verdad.
+  const [clientTransport] = InMemoryTransport.createLinkedPair();
+  let cerrado = false;
+  const originalClose = clientTransport.close.bind(clientTransport);
+  clientTransport.close = async () => {
+    cerrado = true;
+    await originalClose();
+  };
+  await assert.rejects(
+    () => McpToolProvider.connect(cfg(), { transport: clientTransport, timeoutMs: 100 }),
+    /tardo mas de/,
+  );
+  assert.equal(cerrado, true, 'un arranque fallido no puede dejar el transporte vivo');
+});
+
 test('en confidencial, un servidor NO local ni se conecta', async () => {
   const logs: string[] = [];
   const providers = await connectMcpProviders(

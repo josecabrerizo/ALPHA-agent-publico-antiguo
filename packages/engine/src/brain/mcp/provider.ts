@@ -35,34 +35,43 @@ export class McpToolProvider {
    */
   static async connect(
     cfg: McpServerConfig,
-    opts: { transport?: Transport } = {},
+    opts: { transport?: Transport; timeoutMs?: number } = {},
   ): Promise<McpToolProvider> {
     const client = new Client({ name: 'alpha-engine', version: '0.0.1' });
-    const transport = opts.transport ?? makeTransport(cfg);
-    await withTimeout(client.connect(transport), CONNECT_TIMEOUT_MS, `conectar con "${cfg.id}"`);
+    const timeoutMs = opts.timeoutMs ?? CONNECT_TIMEOUT_MS;
+    try {
+      const transport = opts.transport ?? makeTransport(cfg);
+      await withTimeout(client.connect(transport), timeoutMs, `conectar con "${cfg.id}"`);
 
-    // tools/list puede venir paginado: sin seguir nextCursor, todo lo que no
-    // cupiera en la primera pagina desapareceria del registro en silencio.
-    const discovered: Awaited<ReturnType<Client['listTools']>>['tools'] = [];
-    let cursor: string | undefined;
-    do {
-      const page = await withTimeout(
-        client.listTools(cursor ? { cursor } : {}),
-        CONNECT_TIMEOUT_MS,
-        `listar tools de "${cfg.id}"`,
-      );
-      discovered.push(...page.tools);
-      cursor = page.nextCursor;
-    } while (cursor);
+      // tools/list puede venir paginado: sin seguir nextCursor, todo lo que no
+      // cupiera en la primera pagina desapareceria del registro en silencio.
+      const discovered: Awaited<ReturnType<Client['listTools']>>['tools'] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await withTimeout(
+          client.listTools(cursor ? { cursor } : {}),
+          timeoutMs,
+          `listar tools de "${cfg.id}"`,
+        );
+        discovered.push(...page.tools);
+        cursor = page.nextCursor;
+      } while (cursor);
 
-    const tools: Tool[] = [];
-    for (const t of discovered) {
-      // Allowlist opcional: se declara en la config para no ensenar al modelo
-      // veinte esquemas cuando solo interesan dos.
-      if (cfg.tools && !cfg.tools.includes(t.name)) continue;
-      tools.push(adaptTool(client, cfg, t.name, t.description, t.inputSchema, t.annotations));
+      const tools: Tool[] = [];
+      for (const t of discovered) {
+        // Allowlist opcional: se declara en la config para no ensenar al modelo
+        // veinte esquemas cuando solo interesan dos.
+        if (cfg.tools && !cfg.tools.includes(t.name)) continue;
+        tools.push(adaptTool(client, cfg, t.name, t.description, t.inputSchema, t.annotations));
+      }
+      return new McpToolProvider(client, cfg, tools);
+    } catch (err) {
+      // El timeout no cancela la operacion de debajo: sin este close, un stdio
+      // a medio arrancar dejaba a su proceso hijo vivo para siempre, porque
+      // connectMcpProviders omite el provider y stop() nunca llega a conocerlo.
+      await client.close().catch(() => {});
+      throw err;
     }
-    return new McpToolProvider(client, cfg, tools);
   }
 
   get id(): string {
