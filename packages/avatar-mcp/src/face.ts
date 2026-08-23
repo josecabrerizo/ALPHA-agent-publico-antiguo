@@ -45,9 +45,13 @@ export class FaceController {
   private inbox: FaceMessage[] = [];
   /** La voz del avatar ACTIVO: se recrea al cambiar de perfil (la fabrica). */
   private speaker: Speaker | undefined;
-  /** Voces sustituidas que podrian seguir sonando (un decir en vuelo cuando
-   *  cambio el avatar): detener() las corta TODAS, no solo la vigente. */
-  private readonly vocesRetiradas: Speaker[] = [];
+  /**
+   * Voces con habla EN VUELO: cada frase captura su voz al empezar y la
+   * suelta al asentarse. Es lo que permite a detener() cortar una voz
+   * sustituida que aun suena SIN retener para siempre cada reemplazo (una
+   * lista permanente creceria sin limite en una fachada longeva).
+   */
+  private readonly vocesEnVuelo = new Set<Speaker>();
 
   constructor(
     private readonly bridge: AvatarBridge,
@@ -181,9 +185,14 @@ export class FaceController {
     this.estado('hablando');
     this.bridge.broadcast({ type: 'assistant', text: clean });
     if (opts.gesto) this.bridge.broadcast({ type: 'gesture', gesture: opts.gesto });
+    // La voz se captura AHORA: si el avatar cambia a mitad de frase, esta
+    // sigue siendo la que suena y detener() debe poder alcanzarla.
+    const voz = this.speaker;
+    if (voz) this.vocesEnVuelo.add(voz);
     try {
-      await this.speaker?.speak(clean);
+      await voz?.speak(clean);
     } finally {
+      if (voz) this.vocesEnVuelo.delete(voz);
       this.estado('reposo');
     }
   }
@@ -208,13 +217,10 @@ export class FaceController {
     this.active = next;
     // La voz pertenece al PERFIL: se recrea con la del nuevo (si no, Nexus
     // seguiria hablando con la voz y el ritmo de Unit-A). La cola de habla no
-    // se corta; lo que quede en ella sale ya con la voz nueva. La sustituida
-    // se RETIENE: un decir en vuelo puede seguir sonando por ella, y perder
-    // su referencia dejaria a su proceso hijo fuera del alcance de detener().
-    if (this.speakerFor) {
-      if (this.speaker) this.vocesRetiradas.push(this.speaker);
-      this.speaker = this.speakerFor(next);
-    }
+    // se corta; lo que quede en ella sale ya con la voz nueva. Si la
+    // sustituida esta sonando, vocesEnVuelo la mantiene al alcance de
+    // detener() hasta que su frase se asiente.
+    if (this.speakerFor) this.speaker = this.speakerFor(next);
     this.sendAvatars();
     return next;
   }
@@ -226,10 +232,10 @@ export class FaceController {
     return out;
   }
 
-  /** Corta la voz en curso Y las sustituidas (apagado de la fachada). */
+  /** Corta la voz vigente y cualquiera con habla en vuelo (apagado). */
   detener(): void {
     this.speaker?.stop();
-    for (const voz of this.vocesRetiradas) {
+    for (const voz of this.vocesEnVuelo) {
       try {
         voz.stop();
       } catch {

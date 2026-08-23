@@ -219,20 +219,30 @@ test('cambiar de avatar recrea la voz: la del PERFIL nuevo, no la del viejo', as
   });
 });
 
-test('detener() corta tambien las voces sustituidas, no solo la vigente', async () => {
+test('detener() alcanza la voz EN VUELO aunque este sustituida, y la suelta al asentarse', async () => {
   const vulpis = new FakeSpeaker();
+  vulpis.delayMs = 120;
   const nexus = new FakeSpeaker();
   const porPerfil = new Map<string, FakeSpeaker>([
     ['vulpis', vulpis],
     ['nexus', nexus],
   ]);
   await withFace({ speakerFor: (p) => porPerfil.get(p.id) }, async (face) => {
-    face.cambiarAvatar('nexus');
+    const enVuelo = face.decir('frase larga'); // sin esperar: sigue sonando
+    // Dejar ARRANCAR la frase (la voz se captura al empezar a sonar); si el
+    // cambio llegara antes, lo encolado saldria ya con la voz nueva, que es
+    // el comportamiento diseñado para lo aun-no-empezado.
+    await new Promise((r) => setImmediate(r));
+    face.cambiarAvatar('nexus'); // sustituye la voz en pleno decir
     face.detener();
-    // La retirada podia seguir sonando por un decir en vuelo: sin retenerla,
-    // su proceso hijo quedaba fuera del alcance del apagado.
-    assert.equal(vulpis.stops, 1, 'la voz sustituida tambien se corta');
+    assert.equal(vulpis.stops, 1, 'la voz en vuelo se corta aunque ya no sea la vigente');
     assert.equal(nexus.stops, 1);
+    await enVuelo;
+    // Asentada el habla, la sustituida queda LIBERADA (nada de listas que
+    // crecen sin limite): otro apagado ya no la toca.
+    face.detener();
+    assert.equal(vulpis.stops, 1, 'una voz asentada y sustituida no se retiene');
+    assert.equal(nexus.stops, 2);
   });
 });
 
