@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { alphaHomeDir } from '@alpha/protocol';
+import { alphaHomeDir, type AvatarConfigMessage } from '@alpha/protocol';
 import { DEFAULT_AGENT } from './agents.js';
 
 /**
@@ -68,12 +68,11 @@ export function loadSettings(): Settings {
 export function saveSettings(settings: Settings): void {
   try {
     const file = settingsPath();
-    // Conserva el parche pendiente si lo hay: guardar los ajustes de
-    // presentacion no puede borrar una promesa (un mute) aun sin entregar.
-    const pendiente = readRaw(file)['pendiente'];
+    // Guardar los ajustes de presentacion conserva el RESTO de claves del
+    // fichero (pendiente, pendientesPerfil): son promesas sin entregar y no
+    // pueden borrarse por repintar un boton.
+    const out: Record<string, unknown> = { ...readRaw(file), ...settings };
     mkdirSync(path.dirname(file), { recursive: true });
-    const out: Record<string, unknown> = { ...settings };
-    if (pendiente !== undefined) out['pendiente'] = pendiente;
     writeFileSync(file, JSON.stringify(out, null, 2), 'utf8');
   } catch (error) {
     // Que no se pueda guardar no debe tumbar el avatar; se avisa y se sigue.
@@ -107,6 +106,50 @@ export function savePendiente(patch: Partial<Settings> | undefined): void {
   } catch (error) {
     console.error('No se pudo guardar el parche pendiente:', (error as Error).message);
   }
+}
+
+/**
+ * Cola de cambios de PERFIL (avatar-config) sin entregar. Mismo criterio que
+ * el parche pendiente: un "activa confidencial en este perfil" hecho con el
+ * motor caido es una promesa de privacidad y sobrevive al reinicio de la UI.
+ */
+export function loadPendientesPerfil(): AvatarConfigMessage[] {
+  try {
+    return sanitizePerfiles(readRaw(settingsPath())['pendientesPerfil']);
+  } catch {
+    return [];
+  }
+}
+
+export function savePendientesPerfil(list: AvatarConfigMessage[] | undefined): void {
+  try {
+    const file = settingsPath();
+    const raw = readRaw(file);
+    if (list && list.length > 0) raw['pendientesPerfil'] = list;
+    else delete raw['pendientesPerfil'];
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify(raw, null, 2), 'utf8');
+  } catch (error) {
+    console.error('No se pudo guardar la cola de perfiles:', (error as Error).message);
+  }
+}
+
+function sanitizePerfiles(v: unknown): AvatarConfigMessage[] {
+  if (!Array.isArray(v)) return [];
+  const out: AvatarConfigMessage[] = [];
+  for (const item of v) {
+    if (!item || typeof item !== 'object') continue;
+    const r = item as Record<string, unknown>;
+    if (r['type'] !== 'avatar-config' || typeof r['avatarId'] !== 'string') continue;
+    const s = (r['settings'] ?? {}) as Record<string, unknown>;
+    const settings: AvatarConfigMessage['settings'] = {};
+    if (typeof s['model'] === 'string') settings.model = s['model'];
+    if (typeof s['confidential'] === 'boolean') settings.confidential = s['confidential'];
+    if (typeof s['voiceId'] === 'string') settings.voiceId = s['voiceId'];
+    if (Object.keys(settings).length === 0) continue;
+    out.push({ type: 'avatar-config', avatarId: r['avatarId'], settings });
+  }
+  return out;
 }
 
 function readRaw(file: string): Record<string, unknown> {

@@ -191,14 +191,17 @@ function adaptTool(
         return 'Herramienta bloqueada: el modo confidencial no permite herramientas que saquen datos de la maquina.';
       }
       const result = await client.callTool({ name, arguments: args });
-      // Un resultado ESTRUCTURADO sin texto (tools con outputSchema que no lo
-      // duplican como content) tambien es resultado: serializado antes que
-      // "(sin resultado)", que dejaba al modelo sin el JSON devuelto.
+      // Un resultado ESTRUCTURADO tambien es resultado. Cuando el content no
+      // trae TEXTO real (vacio, o solo marcadores tipo [imagen]), el JSON
+      // serializado acompana a los marcadores: sin esto, un "[imagen]" a
+      // secas suprimia el structuredContent y dejaba al modelo a ciegas.
+      const { texto, conTexto } = flattenContent(result.content);
       const structured = (result as { structuredContent?: unknown }).structuredContent;
-      const text =
-        flattenContent(result.content) ||
-        (structured !== undefined ? JSON.stringify(structured) : '') ||
-        '(sin resultado)';
+      const text = conTexto
+        ? texto
+        : [texto, structured !== undefined ? JSON.stringify(structured) : '']
+            .filter(Boolean)
+            .join('\n') || '(sin resultado)';
       return result.isError ? `Error de la herramienta: ${text}` : text;
     },
   };
@@ -237,15 +240,21 @@ function adaptSchema(inputSchema: unknown): JsonSchema {
 
 /**
  * Aplana el content de MCP a texto, que es lo unico que el bucle agentico
- * devuelve al modelo. Lo no textual se nombra en vez de perderse en silencio.
+ * devuelve al modelo. Lo no textual se nombra en vez de perderse en silencio,
+ * y `conTexto` distingue el texto REAL de los meros marcadores: quien llama
+ * decide el fallback ("(sin resultado)" o el structuredContent serializado)
+ * viendo el resultado completo.
  */
-function flattenContent(content: unknown): string {
-  if (!Array.isArray(content)) return '';
+function flattenContent(content: unknown): { texto: string; conTexto: boolean } {
+  if (!Array.isArray(content)) return { texto: '', conTexto: false };
   const parts: string[] = [];
+  let conTexto = false;
   for (const item of content) {
     const c = item as Record<string, unknown>;
-    if (c['type'] === 'text' && typeof c['text'] === 'string') parts.push(c['text']);
-    else if (c['type'] === 'image') parts.push('[imagen]');
+    if (c['type'] === 'text' && typeof c['text'] === 'string') {
+      parts.push(c['text']);
+      conTexto = true;
+    } else if (c['type'] === 'image') parts.push('[imagen]');
     else if (c['type'] === 'audio') parts.push('[audio]');
     else if (c['type'] === 'resource' || c['type'] === 'resource_link') {
       // Un recurso embebido con texto ES el resultado (asi devuelven su
@@ -255,15 +264,15 @@ function flattenContent(content: unknown): string {
       const text = resource?.['text'];
       if (typeof text === 'string' && text) {
         parts.push(text);
+        conTexto = true;
       } else {
         const uri = (c['uri'] as string | undefined) ?? (resource?.['uri'] as string | undefined);
         parts.push(uri ? `[recurso: ${uri}]` : '[recurso]');
       }
     }
   }
-  // Vacio es vacio: el fallback ("(sin resultado)" o el structuredContent
-  // serializado) lo decide quien llama, que ve el resultado completo.
-  return parts.join('\n').trim();
+  const texto = parts.join('\n').trim();
+  return { texto, conTexto: conTexto && texto.length > 0 };
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
