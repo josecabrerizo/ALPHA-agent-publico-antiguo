@@ -5,7 +5,7 @@ import {
   type AvatarOption,
   type AvatarWireState,
 } from '@alpha/protocol';
-import type { AvatarProfile, Speaker } from '@alpha/engine';
+import type { Speaker } from './speaker.js';
 
 /**
  * El controlador de la cara: traduce ordenes de alto nivel (decir, saludar,
@@ -24,13 +24,12 @@ export interface FaceMessage {
   ts: number;
 }
 
-/** Perfil minimo cuando no hay avatars.yaml que cargar: la cara sigue viva. */
-function fallbackProfile(): AvatarProfile {
+/** Perfil minimo cuando no llega ningun catalogo: la cara sigue viva. */
+function fallbackProfile(): AvatarOption {
   return {
     id: 'alpha',
     name: 'A.L.P.H.A.',
     role: 'Asistente',
-    personality: '',
     confidential: true,
     model: '',
     imageId: 'alpha',
@@ -40,8 +39,8 @@ function fallbackProfile(): AvatarProfile {
 }
 
 export class FaceController {
-  private readonly profiles: AvatarProfile[];
-  private active: AvatarProfile;
+  private readonly profiles: AvatarOption[];
+  private active: AvatarOption;
   private inbox: FaceMessage[] = [];
   /** La voz del avatar ACTIVO: se recrea al cambiar de perfil (la fabrica). */
   private speaker: Speaker | undefined;
@@ -55,9 +54,9 @@ export class FaceController {
 
   constructor(
     private readonly bridge: AvatarBridge,
-    profiles: AvatarProfile[],
+    profiles: AvatarOption[],
     activeId?: string,
-    private readonly speakerFor?: (profile: AvatarProfile) => Speaker | undefined,
+    private readonly speakerFor?: (profile: AvatarOption) => Speaker | undefined,
   ) {
     this.profiles = profiles.length > 0 ? profiles : [fallbackProfile()];
     this.active = this.profiles.find((p) => p.id === activeId) ?? this.profiles[0]!;
@@ -138,17 +137,8 @@ export class FaceController {
   }
 
   private sendAvatars(): void {
-    const list: AvatarOption[] = this.profiles.map((p) => ({
-      id: p.id,
-      name: p.name,
-      role: p.role,
-      model: p.model,
-      confidential: p.confidential,
-      voice: p.voice,
-      imageId: p.imageId,
-      color: p.color,
-    }));
-    this.bridge.broadcast({ type: 'avatars', list, current: this.active.id });
+    // Los perfiles YA son AvatarOption (el tipo del cable): viajan tal cual.
+    this.bridge.broadcast({ type: 'avatars', list: [...this.profiles], current: this.active.id });
   }
 
   /** Pose actual: para saludar con ella a un cliente que llegue tarde. */
@@ -207,7 +197,7 @@ export class FaceController {
   }
 
   /** Cambia el avatar activo y lo anuncia (la UI cambia retrato y color). */
-  cambiarAvatar(id: string): AvatarProfile {
+  cambiarAvatar(id: string): AvatarOption {
     const next = this.profiles.find((p) => p.id === id);
     if (!next) {
       throw new Error(
@@ -244,11 +234,11 @@ export class FaceController {
     }
   }
 
-  get activo(): AvatarProfile {
+  get activo(): AvatarOption {
     return this.active;
   }
 
-  avatares(): AvatarProfile[] {
+  avatares(): AvatarOption[] {
     return this.profiles;
   }
 }

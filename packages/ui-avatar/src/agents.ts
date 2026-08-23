@@ -1,12 +1,13 @@
-import type { OrbColor } from '@alpha/protocol';
+import { DEFAULT_AVATAR_ID, FOUNDER_AVATARS, type OrbColor } from '@alpha/protocol';
 
 /**
  * Catalogo de RESPALDO para antes de conectar con el motor: los cuatro agentes
  * fundadores, con nombre, rol y color, para que el menu y el orbe no arranquen
  * vacios. La fuente de verdad son los perfiles que manda el motor (salen de
  * config/avatars.yaml, con su color incluido): un avatar nuevo alli funciona
- * de punta a punta sin tocar este fichero, que solo cubre el hueco hasta que
- * llega el primer mensaje `avatars`.
+ * de punta a punta sin tocar este fichero. Este respaldo se DERIVA del
+ * catalogo compartido de @alpha/protocol (FOUNDER_AVATARS) — antes era una
+ * copia a mano que podia desviarse.
  *
  * El estado (reposo/escuchando/...) es un eje aparte: da el ritmo de la
  * respiracion, no el color. Ver states.ts.
@@ -21,33 +22,10 @@ export interface Agent {
   color: OrbColor;
 }
 
-export const FALLBACK_AGENTS: Record<string, Agent> = {
-  vulpis: {
-    id: 'vulpis',
-    label: 'Vulpis.AI',
-    tagline: 'El explorador proactivo',
-    color: [235, 150, 70], // naranja zorro
-  },
-  'unit-a': {
-    id: 'unit-a',
-    label: 'Unit-A',
-    tagline: 'El asistente cibernetico',
-    color: [95, 155, 210], // azul acero
-  },
-  nexus: {
-    id: 'nexus',
-    label: 'Nexus',
-    tagline: 'El guardian de datos',
-    color: [70, 210, 200], // cian cristal
-  },
-  synapse: {
-    id: 'synapse',
-    label: 'Synapse',
-    tagline: 'La guia neural',
-    color: [175, 110, 235], // violeta etereo
-  },
-};
+export const FALLBACK_AGENTS: Record<string, Agent> = Object.fromEntries(
+  FOUNDER_AVATARS.map((a) => [a.id, { id: a.id, label: a.name, tagline: a.role, color: a.color }]),
+);
 
-export const AGENT_ORDER: string[] = ['vulpis', 'unit-a', 'nexus', 'synapse'];
+export const AGENT_ORDER: string[] = FOUNDER_AVATARS.map((a) => a.id);
 
-export const DEFAULT_AGENT = 'unit-a';
+export const DEFAULT_AGENT: string = DEFAULT_AVATAR_ID;

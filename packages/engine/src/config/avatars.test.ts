@@ -4,7 +4,7 @@ import { existsSync, readdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { inflateSync } from 'node:zlib';
 import path from 'node:path';
-import { DEFAULT_ORB_COLOR } from '@alpha/protocol';
+import { DEFAULT_AVATAR_ID, DEFAULT_ORB_COLOR, FOUNDER_AVATARS } from '@alpha/protocol';
 import { parseAvatars, loadAvatars, patchAvatarsYaml } from './avatars.js';
 import { repoRoot } from '../paths.js';
 
@@ -213,6 +213,30 @@ test('el avatars.yaml del repo trae los cuatro perfiles y respeta el contrato', 
   assert.ok(
     avatars.some((a) => a.confidential),
     'debe haber al menos un avatar confidencial',
+  );
+});
+
+/**
+ * FOUNDER_AVATARS (en @alpha/protocol) es la copia del catalogo que usan la
+ * fachada avatar-mcp y el respaldo de la UI — piezas que viviran en OTRO repo,
+ * sin acceso a este yaml. Este espejo es el puente del invariante: si el yaml
+ * cambia, falla aqui y se actualiza protocol; si protocol se desvia, tambien.
+ */
+test('el catalogo compartido FOUNDER_AVATARS es un espejo exacto del yaml', () => {
+  const enElCable = loadAvatars().map((a) => ({
+    id: a.id,
+    name: a.name,
+    role: a.role,
+    model: a.model,
+    confidential: a.confidential,
+    voice: a.voice,
+    imageId: a.imageId,
+    color: a.color,
+  }));
+  assert.deepEqual(enElCable, [...FOUNDER_AVATARS]);
+  assert.ok(
+    FOUNDER_AVATARS.some((a) => a.id === DEFAULT_AVATAR_ID),
+    'el avatar por defecto del catalogo debe existir en el propio catalogo',
   );
 });
 
