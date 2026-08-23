@@ -29,21 +29,34 @@ const pendientesPerfil: AvatarConfigMessage[] = [];
 
 // Conexion con el motor: refleja el estado de la conversacion en el orbe y
 // muestra el ultimo texto. Si el motor no esta, reintenta hasta que aparezca.
+/**
+ * Confirmacion POR CAMPO del parche pendiente: solo cuando el estado
+ * autoritativo del motor dice que un valor ya es el suyo, esa promesa queda
+ * cumplida y se limpia. Enviar no basta — send() solo garantiza que el socket
+ * estaba escribible, y un motor que caiga con el envio en el buffer no lo
+ * habra aplicado ni persistido: el parche debe sobrevivir para reintentarse.
+ */
+function confirmarPendiente<K extends keyof ConfigMessage['settings']>(
+  campo: K,
+  valor: ConfigMessage['settings'][K],
+): void {
+  if (pendiente[campo] === undefined || pendiente[campo] !== valor) return;
+  delete pendiente[campo];
+  savePendiente(Object.keys(pendiente).length > 0 ? pendiente : undefined);
+  log(`config pendiente confirmada por el motor: ${campo}=${String(valor)}`);
+}
+
 const bridge = connectBridge((msg) => {
   if (msg.type === 'ready') {
     log('motor autenticado: el avatar ya manda y recibe');
-    // Reenvio de lo cambiado sin conexion. El motor lo aplica, lo persiste y
-    // responde con su estado autoritativo (mic, avatares), asi que la UI
-    // acaba alineada con la verdad aunque algo del parche se rechace.
+    // Reenvio de lo cambiado sin conexion. NO se limpia aqui: la limpieza
+    // llega campo a campo cuando el motor confirma con su estado autoritativo
+    // (mic/avatars/devices). El reenvio es idempotente, asi que si el motor
+    // cayo antes de aplicarlo, el siguiente ready lo reintenta.
     if (Object.keys(pendiente).length > 0) {
-      const parche = pendiente;
-      if (bridge.send({ type: 'config', settings: parche })) {
-        pendiente = {};
-        savePendiente(undefined);
-        log(`config pendiente → motor: ${JSON.stringify(parche)}`);
+      if (bridge.send({ type: 'config', settings: pendiente })) {
+        log(`config pendiente → motor: ${JSON.stringify(pendiente)}`);
       }
-      // Si el socket murio entre el ready y el envio, el parche se conserva
-      // (en memoria y en disco) para el siguiente intento.
     }
     for (const mensaje of pendientesPerfil.splice(0)) {
       if (bridge.send(mensaje)) {
@@ -57,6 +70,7 @@ const bridge = connectBridge((msg) => {
     // Estado REAL del microfono segun el motor: la cache de esta UI se alinea
     // sin reenviar nada (si no, podia mostrar silencio mientras se capturaba).
     avatar.setMicEnabled(msg.enabled);
+    confirmarPendiente('micEnabled', msg.enabled);
     log(msg.enabled ? 'micrófono activo (motor)' : 'micrófono silenciado (motor)');
   } else if (msg.type === 'gesture') {
     // El gesto lo decide el motor; la UI solo lo ejecuta. Saludar es algo que
@@ -73,9 +87,11 @@ const bridge = connectBridge((msg) => {
     log(`ALPHA › ${msg.text}`);
   } else if (msg.type === 'devices') {
     avatar.setMicDevices(msg.inputs, msg.current);
+    if (msg.current !== undefined) confirmarPendiente('audioDevice', msg.current);
     log(`motor conectado · ${msg.inputs.length} micrófonos disponibles`);
   } else if (msg.type === 'avatars') {
     avatar.setAvatarOptions(msg.list, msg.current);
+    if (msg.current !== undefined) confirmarPendiente('agent', msg.current);
     const nombres = msg.list
       .map((a) => `${a.name}${a.confidential ? ' (confidencial)' : ''}`)
       .join(', ');
