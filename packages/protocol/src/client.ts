@@ -35,9 +35,10 @@ function readToken(): string {
 }
 
 export interface BridgeHandle {
-  /** Envia la config al motor. Si no esta autenticado, se ignora (el motor la
-   *  leera del fichero al arrancar). */
-  send(msg: ConfigMessage | AvatarConfigMessage): void;
+  /** Envia la config al motor. Devuelve false si aun no hay motor autenticado:
+   *  el llamante decide si guardar el cambio para reenviarlo al conectar (un
+   *  mute descartado en silencio seria una promesa de privacidad rota). */
+  send(msg: ConfigMessage | AvatarConfigMessage): boolean;
   /** Envia un mensaje escrito. Devuelve false si el motor no lo va a recibir. */
   sendText(text: string): boolean;
   /** true si el motor ya acuso el handshake. */
@@ -104,8 +105,10 @@ export function connectBridge(onMessage: (msg: EngineToAvatarMessage) => void): 
 
   connect();
   return {
-    send(msg: ConfigMessage | AvatarConfigMessage) {
-      if (usable()) socket?.write(JSON.stringify(msg) + '\n');
+    send(msg: ConfigMessage | AvatarConfigMessage): boolean {
+      if (!usable()) return false;
+      socket?.write(JSON.stringify(msg) + '\n');
+      return true;
     },
     sendText(text: string): boolean {
       if (!usable()) return false;

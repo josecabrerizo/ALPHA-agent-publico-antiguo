@@ -6,7 +6,7 @@
  * por linea); si el motor no esta, la ventana funciona sola y reintenta.
  */
 import { AvatarWindow } from './avatar-window.js';
-import { connectBridge } from '@alpha/protocol';
+import { connectBridge, type AvatarConfigMessage, type ConfigMessage } from '@alpha/protocol';
 import { log } from './log.js';
 
 const avatar = new AvatarWindow();
@@ -15,14 +15,36 @@ avatar.show();
 // Mantener viva la referencia: sin esto el GC podria llevarse la ventana.
 (globalThis as Record<string, unknown>)['__alphaAvatar'] = avatar;
 
+// Cambios hechos SIN motor: se acumulan y se reenvian al autenticar. El caso
+// que importa es el mute pre-arranque — es una promesa de privacidad y no
+// puede perderse en silencio (la cache de ~/.alpha es solo presentacion).
+let pendiente: ConfigMessage['settings'] = {};
+// Los cambios de PERFIL (modelo, voz, confidencial de un avatar) tambien: el
+// menu sigue operativo con los catalogos cacheados durante un reinicio del
+// motor, y "activar confidencial" descartado en silencio dejaria al perfil
+// usando la nube creyendose local.
+const pendientesPerfil: AvatarConfigMessage[] = [];
+
 // Conexion con el motor: refleja el estado de la conversacion en el orbe y
 // muestra el ultimo texto. Si el motor no esta, reintenta hasta que aparezca.
 const bridge = connectBridge((msg) => {
   if (msg.type === 'ready') {
-    // No se reenvia la config: el motor es el dueno de la configuracion (el la
-    // persiste; lo que esta UI guarda en ~/.alpha es presentacion para antes
-    // de conectar). Manda lo que el motor diga que tiene puesto.
     log('motor autenticado: el avatar ya manda y recibe');
+    // Reenvio de lo cambiado sin conexion. El motor lo aplica, lo persiste y
+    // responde con su estado autoritativo (mic, avatares), asi que la UI
+    // acaba alineada con la verdad aunque algo del parche se rechace.
+    if (Object.keys(pendiente).length > 0) {
+      const parche = pendiente;
+      pendiente = {};
+      if (bridge.send({ type: 'config', settings: parche })) {
+        log(`config pendiente → motor: ${JSON.stringify(parche)}`);
+      }
+    }
+    for (const mensaje of pendientesPerfil.splice(0)) {
+      if (bridge.send(mensaje)) {
+        log(`perfil pendiente → motor: avatar=${mensaje.avatarId}`);
+      }
+    }
   } else if (msg.type === 'state') {
     avatar.setState(msg.state);
     log(`estado: ${msg.state}`);
@@ -69,15 +91,28 @@ const bridge = connectBridge((msg) => {
 (globalThis as Record<string, unknown>)['__alphaBridge'] = bridge;
 
 // Lo que se cambie en el menu del avatar viaja al motor: el avatar es el panel
-// de control. Viaja SOLO el parche de lo cambiado, nunca la cache entera.
+// de control. Viaja SOLO el parche de lo cambiado, nunca la cache entera; sin
+// motor, el parche se acumula para reenviarse al autenticar.
 avatar.setOnSettingsChanged((patch) => {
-  bridge.send({ type: 'config', settings: patch });
-  log(`config → motor: ${JSON.stringify(patch)}`);
+  if (bridge.send({ type: 'config', settings: patch })) {
+    log(`config → motor: ${JSON.stringify(patch)}`);
+  } else {
+    pendiente = { ...pendiente, ...patch };
+    log(`config pendiente (sin motor): ${JSON.stringify(patch)}`);
+  }
 });
 
 avatar.setOnAvatarSettingsChanged((message) => {
-  bridge.send(message);
-  log(`perfil → motor: avatar=${message.avatarId}, cambios=${JSON.stringify(message.settings)}`);
+  // Sin motor, el cambio de perfil se guarda para reenviarlo al autenticar; y
+  // el log dice la verdad (antes anunciaba "enviado" sobre un send ignorado).
+  if (bridge.send(message)) {
+    log(`perfil → motor: avatar=${message.avatarId}, cambios=${JSON.stringify(message.settings)}`);
+  } else {
+    pendientesPerfil.push(message);
+    log(
+      `perfil pendiente (sin motor): avatar=${message.avatarId}, cambios=${JSON.stringify(message.settings)}`,
+    );
+  }
 });
 
 // Chat escrito: Enter en el campo del avatar manda el texto al motor.
