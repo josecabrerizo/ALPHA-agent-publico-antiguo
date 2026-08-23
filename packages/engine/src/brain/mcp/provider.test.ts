@@ -2,8 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { McpToolProvider } from './provider.js';
+import { connectMcpProviders, McpToolProvider } from './provider.js';
 import { parseMcpServers, type McpServerConfig } from './types.js';
 
 /**
@@ -161,6 +163,76 @@ test('readOnlyHint decide destructive; sin pista, se asume que tiene efectos', a
       assert.equal(byName.get('mcp_fake__echo')?.destructive, true);
     },
   );
+});
+
+test('tools/list paginado: se siguen los nextCursor hasta agotar', async () => {
+  // Servidor de bajo nivel: el McpServer de alto nivel no pagina, y lo que se
+  // prueba es justo que la segunda pagina no se pierda en silencio.
+  const toolDef = (name: string) => ({
+    name,
+    description: 'x',
+    inputSchema: { type: 'object' as const },
+  });
+  const server = new Server(
+    { name: 'paginado', version: '1.0.0' },
+    { capabilities: { tools: {} } },
+  );
+  server.setRequestHandler(ListToolsRequestSchema, (req) => {
+    if (!req.params?.cursor) return { tools: [toolDef('uno')], nextCursor: 'pagina-2' };
+    return { tools: [toolDef('dos')] };
+  });
+  server.setRequestHandler(CallToolRequestSchema, () => ({
+    content: [{ type: 'text', text: 'x' }],
+  }));
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const provider = await McpToolProvider.connect(cfg(), { transport: clientTransport });
+  try {
+    assert.deepEqual(
+      provider
+        .tools()
+        .map((t) => t.name)
+        .sort(),
+      ['mcp_fake__dos', 'mcp_fake__uno'],
+      'las tools de la segunda pagina no pueden desaparecer del registro',
+    );
+  } finally {
+    await provider.close();
+    await server.close();
+  }
+});
+
+test('en confidencial, un servidor NO local ni se conecta', async () => {
+  const logs: string[] = [];
+  const providers = await connectMcpProviders(
+    { remoto: { transport: 'stdio', command: 'binario-que-no-existe' } },
+    (m) => logs.push(m),
+    { confidential: true },
+  );
+  assert.deepEqual(providers, []);
+  assert.ok(
+    logs.some((l) => l.includes('omitido')),
+    `debe omitirse sin intentar conectar; logs: ${logs.join(' | ')}`,
+  );
+  assert.ok(
+    !logs.some((l) => l.includes('no disponible')),
+    'si hubiera intentado conectar, el spawn habria fallado en vez de omitirse',
+  );
+});
+
+test('un servidor local si se intenta conectar en confidencial', async () => {
+  // No se puede inyectar transporte por connectMcpProviders; basta demostrar
+  // que el filtro NO lo bloquea: el intento real falla por binario inexistente
+  // y se loguea como "no disponible", no como "omitido".
+  const logs: string[] = [];
+  const providers = await connectMcpProviders(
+    { cercano: { transport: 'stdio', command: 'binario-que-no-existe', local: true } },
+    (m) => logs.push(m),
+    { confidential: true },
+  );
+  assert.deepEqual(providers, []);
+  assert.ok(logs.some((l) => l.includes('no disponible')));
+  assert.ok(!logs.some((l) => l.includes('omitido')));
 });
 
 /* ── parseMcpServers ─────────────────────────────────────────────────────── */

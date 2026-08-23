@@ -26,6 +26,11 @@ const bridge = connectBridge((msg) => {
   } else if (msg.type === 'state') {
     avatar.setState(msg.state);
     log(`estado: ${msg.state}`);
+  } else if (msg.type === 'mic') {
+    // Estado REAL del microfono segun el motor: la cache de esta UI se alinea
+    // sin reenviar nada (si no, podia mostrar silencio mientras se capturaba).
+    avatar.setMicEnabled(msg.enabled);
+    log(msg.enabled ? 'micrófono activo (motor)' : 'micrófono silenciado (motor)');
   } else if (msg.type === 'gesture') {
     // El gesto lo decide el motor; la UI solo lo ejecuta. Saludar es algo que
     // pasa una vez, no una fase del turno.
@@ -40,7 +45,7 @@ const bridge = connectBridge((msg) => {
     avatar.showCaption(msg.text);
     log(`ALPHA › ${msg.text}`);
   } else if (msg.type === 'devices') {
-    avatar.setMicDevices(msg.inputs);
+    avatar.setMicDevices(msg.inputs, msg.current);
     log(`motor conectado · ${msg.inputs.length} micrófonos disponibles`);
   } else if (msg.type === 'avatars') {
     avatar.setAvatarOptions(msg.list, msg.current);
@@ -64,10 +69,10 @@ const bridge = connectBridge((msg) => {
 (globalThis as Record<string, unknown>)['__alphaBridge'] = bridge;
 
 // Lo que se cambie en el menu del avatar viaja al motor: el avatar es el panel
-// de control. (Si el motor no esta conectado, lo leera del fichero al arrancar.)
-avatar.setOnSettingsChanged((settings) => {
-  bridge.send({ type: 'config', settings });
-  log(`config → motor: agente=${settings.agent}, micro=${settings.audioDevice || '(sistema)'}`);
+// de control. Viaja SOLO el parche de lo cambiado, nunca la cache entera.
+avatar.setOnSettingsChanged((patch) => {
+  bridge.send({ type: 'config', settings: patch });
+  log(`config → motor: ${JSON.stringify(patch)}`);
 });
 
 avatar.setOnAvatarSettingsChanged((message) => {

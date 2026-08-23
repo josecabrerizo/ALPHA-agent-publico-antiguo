@@ -40,14 +40,23 @@ export class McpToolProvider {
     const client = new Client({ name: 'alpha-engine', version: '0.0.1' });
     const transport = opts.transport ?? makeTransport(cfg);
     await withTimeout(client.connect(transport), CONNECT_TIMEOUT_MS, `conectar con "${cfg.id}"`);
-    const listed = await withTimeout(
-      client.listTools(),
-      CONNECT_TIMEOUT_MS,
-      `listar tools de "${cfg.id}"`,
-    );
+
+    // tools/list puede venir paginado: sin seguir nextCursor, todo lo que no
+    // cupiera en la primera pagina desapareceria del registro en silencio.
+    const discovered: Awaited<ReturnType<Client['listTools']>>['tools'] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await withTimeout(
+        client.listTools(cursor ? { cursor } : {}),
+        CONNECT_TIMEOUT_MS,
+        `listar tools de "${cfg.id}"`,
+      );
+      discovered.push(...page.tools);
+      cursor = page.nextCursor;
+    } while (cursor);
 
     const tools: Tool[] = [];
-    for (const t of listed.tools) {
+    for (const t of discovered) {
       // Allowlist opcional: se declara en la config para no ensenar al modelo
       // veinte esquemas cuando solo interesan dos.
       if (cfg.tools && !cfg.tools.includes(t.name)) continue;
@@ -77,6 +86,7 @@ export class McpToolProvider {
 export async function connectMcpProviders(
   raw: unknown,
   log: (message: string) => void,
+  opts: { confidential?: boolean } = {},
 ): Promise<McpToolProvider[]> {
   const { servers, warnings } = parseMcpServers(raw);
   for (const w of warnings) log(`✗ [mcp] ${w}`);
@@ -85,6 +95,16 @@ export async function connectMcpProviders(
     servers
       .filter((s) => s.enabled)
       .map(async (s) => {
+        // En confidencial, un servidor no local NI SE CONECTA: el propio
+        // handshake ya manda cabeceras (http) o arranca un proceso que puede
+        // salir a la red (stdio). Filtrar solo las tools no bastaba.
+        if (opts.confidential && !s.local) {
+          log(
+            `mcp "${s.id}" omitido: modo confidencial y el servidor no es local; ` +
+              `arranca sin confidencial para usarlo`,
+          );
+          return undefined;
+        }
         try {
           const provider = await McpToolProvider.connect(s);
           log(

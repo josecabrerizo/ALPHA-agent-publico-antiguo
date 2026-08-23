@@ -73,6 +73,12 @@ export type EngineToAvatarMessage =
   /** Acuse del handshake: hasta recibirlo, el avatar no esta autenticado. */
   | { type: 'ready'; version: number }
   | { type: 'state'; state: AvatarWireState }
+  /**
+   * Estado REAL del microfono del motor (autoritativo). Viaja al autenticarse
+   * y en cada cambio: sin el, la cache de presentacion de la UI podia mostrar
+   * un micro silenciado mientras el motor capturaba (o al reves).
+   */
+  | { type: 'mic'; enabled: boolean }
   /** Gesto puntual decidido por el MOTOR (la UI no infiere nada del texto). */
   | { type: 'gesture'; gesture: AvatarGesture }
   | { type: 'user'; text: string }

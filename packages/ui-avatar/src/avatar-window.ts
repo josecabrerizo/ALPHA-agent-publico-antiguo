@@ -144,8 +144,8 @@ export class AvatarWindow {
   private dragDX = 0;
   private dragDY = 0;
 
-  /** Se llama al cambiar la config en el menu, para propagarla al motor. */
-  private onSettingsChanged: ((settings: Settings) => void) | undefined;
+  /** Se llama al cambiar la config en el menu, para propagar SOLO el cambio. */
+  private onSettingsChanged: ((patch: Partial<Settings>) => void) | undefined;
   /** Cambios de modelo, voz y privacidad, que pertenecen a un perfil. */
   private onAvatarSettingsChanged: ((message: AvatarConfigMessage) => void) | undefined;
 
@@ -195,7 +195,7 @@ export class AvatarWindow {
   }
 
   /** Registra quien recibe los cambios de config (para mandarlos al motor). */
-  setOnSettingsChanged(cb: (settings: Settings) => void): void {
+  setOnSettingsChanged(cb: (patch: Partial<Settings>) => void): void {
     this.onSettingsChanged = cb;
   }
 
@@ -213,9 +213,28 @@ export class AvatarWindow {
     return this.settings;
   }
 
-  /** Recibe del motor la lista de microfonos disponibles. */
-  setMicDevices(inputs: { name: string; isDefault: boolean }[]): void {
+  /** Recibe del motor la lista de microfonos disponibles y cual esta activo. */
+  setMicDevices(inputs: { name: string; isDefault: boolean }[], current?: string): void {
     this.micDevices = inputs;
+    // El dispositivo activo lo dice el MOTOR: la cache se alinea sin reenviar
+    // (antes se descartaba y el menu podia marcar un micro que no era el real).
+    if (current !== undefined && current !== this.settings.audioDevice) {
+      this.settings = { ...this.settings, audioDevice: current };
+      saveSettings(this.settings);
+    }
+  }
+
+  /**
+   * Estado REAL del microfono segun el MOTOR (autoritativo): se refleja en la
+   * cache y el boton sin reenviarlo. La cache de esta UI puede venir de otro
+   * arranque, y un icono de silencio sobre una captura viva es una mentira de
+   * privacidad.
+   */
+  setMicEnabled(enabled: boolean): void {
+    if (this.settings.micEnabled === enabled) return;
+    this.settings = { ...this.settings, micEnabled: enabled };
+    saveSettings(this.settings);
+    this.paintMicButton();
   }
 
   /**
@@ -618,7 +637,10 @@ export class AvatarWindow {
     // applyPortrait repinta tambien el orbe/halo, asi que cubre los dos casos.
     this.applyPortrait();
     this.paintMicButton();
-    this.onSettingsChanged?.(this.settings);
+    // SOLO el parche: reenviar la cache entera podia resucitar un micEnabled
+    // o un microfono rancios si el motor tenia otra cosa (la cache de esta UI
+    // es presentacion, no la verdad; la verdad la persiste el motor).
+    this.onSettingsChanged?.(patch);
   }
 
   private action(
