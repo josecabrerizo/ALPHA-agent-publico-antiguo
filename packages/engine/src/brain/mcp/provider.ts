@@ -253,7 +253,9 @@ function flattenContent(content: unknown): { texto: string; conTexto: boolean } 
     const c = item as Record<string, unknown>;
     if (c['type'] === 'text' && typeof c['text'] === 'string') {
       parts.push(c['text']);
-      conTexto = true;
+      // Solo cuenta como texto real si el FRAGMENTO trae algo: uno de puros
+      // espacios junto a un marcador volveria a suprimir el structuredContent.
+      if (c['text'].trim()) conTexto = true;
     } else if (c['type'] === 'image') parts.push('[imagen]');
     else if (c['type'] === 'audio') parts.push('[audio]');
     else if (c['type'] === 'resource' || c['type'] === 'resource_link') {
@@ -262,7 +264,7 @@ function flattenContent(content: unknown): { texto: string; conTexto: boolean } 
       // texto. La marca con la uri queda solo para lo no textual.
       const resource = c['resource'] as Record<string, unknown> | undefined;
       const text = resource?.['text'];
-      if (typeof text === 'string' && text) {
+      if (typeof text === 'string' && text.trim()) {
         parts.push(text);
         conTexto = true;
       } else {
@@ -271,8 +273,9 @@ function flattenContent(content: unknown): { texto: string; conTexto: boolean } 
       }
     }
   }
-  const texto = parts.join('\n').trim();
-  return { texto, conTexto: conTexto && texto.length > 0 };
+  // conTexto ya es por-fragmento (y con trim): no hace falta mirar el total,
+  // que mezclaria los marcadores y volveria a dar el falso positivo.
+  return { texto: parts.join('\n').trim(), conTexto };
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {

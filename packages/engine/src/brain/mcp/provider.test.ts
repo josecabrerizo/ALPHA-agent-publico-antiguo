@@ -299,7 +299,12 @@ test('con solo un marcador ([imagen]) el structuredContent acompana, no se supri
     tools: [{ name: 'grafica', description: 'x', inputSchema: { type: 'object' as const } }],
   }));
   server.setRequestHandler(CallToolRequestSchema, () => ({
-    content: [{ type: 'image', data: 'aWJt', mimeType: 'image/png' }],
+    // El texto de puros espacios NO cuenta como texto real: sin el trim por
+    // fragmento, este content volvia a suprimir el structuredContent.
+    content: [
+      { type: 'text', text: '   ' },
+      { type: 'image', data: 'aWJt', mimeType: 'image/png' },
+    ],
     structuredContent: { total: 7 },
   }));
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
