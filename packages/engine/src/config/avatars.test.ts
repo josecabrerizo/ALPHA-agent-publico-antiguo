@@ -159,6 +159,26 @@ test('sin campo image, el imageId es el propio id del perfil', () => {
   assert.equal(avatar?.imageId, 'nexus');
 });
 
+test('una imagen fuera de la convencion se avisa: solo viaja su imageId', () => {
+  const avisos: string[] = [];
+  const original = console.warn;
+  console.warn = (...args: unknown[]) => avisos.push(args.join(' '));
+  try {
+    // Antes viajaba la ruta absoluta y esto funcionaba; ahora degradaria al
+    // orbe en silencio si nadie lo dijera.
+    const [custom] = parseAvatars('avatars: [{ id: c, name: C, image: "C:/fotos/mi-cara.jpg" }]');
+    assert.equal(custom?.imageId, 'mi-cara');
+    const [convencional] = parseAvatars(
+      'avatars: [{ id: v, name: V, image: assets/avatars/v.png }]',
+    );
+    assert.equal(convencional?.imageId, 'v');
+  } finally {
+    console.warn = original;
+  }
+  assert.equal(avisos.length, 1, 'la ruta convencional no avisa; la custom si');
+  assert.match(avisos[0]!, /mi-cara/);
+});
+
 test('el color se lee del YAML y uno invalido o ausente cae al neutro', () => {
   const [avatar] = parseAvatars(`
 avatars:

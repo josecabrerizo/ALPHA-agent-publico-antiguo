@@ -174,6 +174,9 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
         onLevel: (level, speaking) => cb.onLevel?.(level, speaking),
         onLog: (m) => log(`   ${m}`),
         onMicChange: (enabled) => {
+          // El estado REAL del micro viaja siempre: la UI lo refleja sin
+          // fiarse de su cache de presentacion.
+          bridge.broadcast({ type: 'mic', enabled });
           // Con el micro cerrado no esta "escuchando": el avatar pasa a reposo.
           if (!enabled) bridge.broadcast({ type: 'state', state: 'reposo' });
           cb.onMicChange?.(enabled);
@@ -273,6 +276,9 @@ export async function startEngineRuntime(cb: EngineRuntimeCallbacks = {}): Promi
 
     /** Todo lo que hay que mandarle a un avatar recien autenticado. */
     async function greetClient(): Promise<void> {
+      // El estado real del micro, lo primero: es una promesa de privacidad y
+      // la cache de la UI puede venir de otro arranque (o de otro checkout).
+      bridge.broadcast({ type: 'mic', enabled: session.isMicEnabled() });
       void sendDevices();
       sendAvatars();
       sendModels();
