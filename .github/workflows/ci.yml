@@ -4,11 +4,14 @@ name: CI
 # ahora no habia CI ordinaria: la unica automatizacion eran los agentes, asi que
 # un fallo de compilacion podia entrar en master sin que nada lo detectara.
 
+# `develop` es la rama de integracion: es ahi donde llegan las PR y donde tiene
+# que estar la red. `master` se deja tambien porque es donde acaba lo que se
+# publica, y romperla sin enterarse seria peor.
 on:
   push:
-    branches: [master]
+    branches: [develop, master]
   pull_request:
-    branches: [master]
+    branches: [develop, master]
 
 # Un PR que recibe varios pushes seguidos no necesita terminar las ejecuciones
 # viejas.
