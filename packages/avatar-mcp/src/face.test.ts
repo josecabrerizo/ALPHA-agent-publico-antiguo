@@ -8,9 +8,10 @@ import {
   AvatarBridge,
   bridgeTokenPathFor,
   takeLines,
+  type AvatarOption,
   type EngineToAvatarMessage,
 } from '@alpha/protocol';
-import type { AvatarProfile, Speaker } from '@alpha/engine';
+import type { Speaker } from './speaker.js';
 import { FaceController } from './face.js';
 
 /**
@@ -26,12 +27,11 @@ process.env['ALPHA_HOME'] = mkdtempSync(path.join(os.tmpdir(), 'alpha-face-test-
 const TEST_PORT = 43231;
 const tick = (ms = 150) => new Promise((r) => setTimeout(r, ms));
 
-function perfil(id: string, name: string): AvatarProfile {
+function perfil(id: string, name: string): AvatarOption {
   return {
     id,
     name,
     role: 'rol',
-    personality: 'p',
     confidential: false,
     model: 'ollama/x',
     imageId: id,
@@ -87,10 +87,10 @@ async function conectarCliente(): Promise<FakeClient> {
 
 async function withFace(
   opts: {
-    profiles?: AvatarProfile[];
+    profiles?: AvatarOption[];
     activeId?: string;
     speaker?: Speaker;
-    speakerFor?: (p: AvatarProfile) => Speaker | undefined;
+    speakerFor?: (p: AvatarOption) => Speaker | undefined;
   },
   fn: (face: FaceController, cliente: FakeClient) => Promise<void>,
 ): Promise<void> {

@@ -13,7 +13,6 @@
     "coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-exclude=\"src/**/*.test.ts\" \"src/**/*.test.ts\""
   },
   "dependencies": {
-    "@alpha/engine": "0.0.1",
     "@alpha/protocol": "0.0.1",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "zod": "^4.4.3"

@@ -98,13 +98,19 @@ export function registerFaceTools(server: McpServer, face: FaceLike): void {
     },
   );
 
+  // Los ids se toman del catalogo VIVO al registrar (fijo durante el proceso):
+  // la descripcion no puede prometer perfiles que cambiarAvatar rechazaria
+  // (antes remitia a config/avatars.yaml, que esta fachada ya no lee).
+  const ids = face
+    .avatares()
+    .map((a) => a.id)
+    .join(', ');
   server.registerTool(
     'cambiar_avatar',
     {
-      description:
-        'Cambia el personaje activo (retrato, color y nombre). Los disponibles salen de config/avatars.yaml del proyecto ALPHA.',
+      description: `Cambia el personaje activo (retrato, color y nombre). Disponibles: ${ids}.`,
       inputSchema: {
-        avatarId: z.string().describe('Id del avatar (p. ej. vulpis, unit-a, nexus, synapse)'),
+        avatarId: z.string().describe(`Id del avatar (uno de: ${ids})`),
       },
       annotations: { readOnlyHint: false },
     },
