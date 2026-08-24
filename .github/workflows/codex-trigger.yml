@@ -8,9 +8,16 @@ name: Codex Trigger
 # usuarios con su cuenta vinculada.
 #
 # Solo opened/reopened (NO synchronize): no re-dispara en cada push.
+#
+# pull_request_target (y no pull_request) A PROPOSITO: las PRs del ciclo
+# normal vienen de un fork, y en `pull_request` los secretos del repo no
+# existen — el PAT llegaba vacio y el job fallaba en todas las PRs. Es seguro
+# aqui porque este workflow NUNCA hace checkout del codigo de la PR: solo
+# publica un comentario con el script fijado abajo (que ademas corre con la
+# definicion de la rama base, no la de la PR).
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, reopened]
     # `develop` es donde llegan las PR del ciclo normal. Sin esta rama aqui, la
     # revision de Codex —que es una puerta, no un tramite— no se dispararia.

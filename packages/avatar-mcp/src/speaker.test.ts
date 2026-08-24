@@ -26,11 +26,16 @@ test('off y modos invalidos dejan la cara muda (con aviso en el invalido)', () =
 test('edge ya no existe en la fachada: avisa y cae a sapi', () => {
   const avisos: string[] = [];
   const speaker = createFacadeSpeaker(unitA, { mode: 'edge', log: (m) => avisos.push(m) });
-  assert.equal(avisos.length, 1);
   assert.match(avisos[0]!, /motor real/);
   if (process.platform === 'win32') {
+    assert.equal(avisos.length, 1);
     assert.ok(speaker instanceof SapiSpeaker, 'en Windows, cae a la voz local');
   } else {
+    // Fuera de Windows la caida a sapi tampoco puede sonar: el segundo aviso
+    // es el de "cara muda" (exigir UN aviso aqui era un supuesto de Windows y
+    // rompia la suite en el CI de Linux).
+    assert.equal(avisos.length, 2);
+    assert.match(avisos[1]!, /fuera de Windows/);
     assert.equal(speaker, undefined, 'fuera de Windows no hay SAPI');
   }
 });
