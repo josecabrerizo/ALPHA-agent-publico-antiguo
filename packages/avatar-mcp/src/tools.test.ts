@@ -111,6 +111,18 @@ test('leer_mensajes entrega lo escrito y luego dice que no hay nada', async () =
   });
 });
 
+test('cambiar_avatar anuncia los ids REALES del catalogo, no una lista escrita a mano', async () => {
+  await withClient(async (client) => {
+    const { tools } = await client.listTools();
+    const tool = tools.find((t) => t.name === 'cambiar_avatar');
+    // El stub solo tiene a vulpis: si apareciera otro id (o el yaml del
+    // motor), la descripcion estaria prometiendo avatares que no existen.
+    assert.match(tool?.description ?? '', /vulpis/);
+    assert.doesNotMatch(tool?.description ?? '', /unit-a/, 'ids del catalogo vivo, no un ejemplo');
+    assert.doesNotMatch(tool?.description ?? '', /avatars\.yaml/, 'la fachada no lee ese yaml');
+  });
+});
+
 test('cambiar_avatar desconocido vuelve como isError con la pista, no como excepcion', async () => {
   await withClient(async (client) => {
     const result = await client.callTool({ name: 'cambiar_avatar', arguments: { avatarId: 'x' } });
