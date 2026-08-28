@@ -32,6 +32,13 @@ jobs:
     steps:
       # Fijadas por SHA: un tag movil se puede reapuntar a otro commit.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # checkout deja el GITHUB_TOKEN como http.extraheader en la config
+          # LOCAL del workspace, y esa cabecera acompana a TODA peticion git a
+          # github.com hecha desde dentro — pisando la autenticacion del
+          # insteadOf y dando 404 sobre ALPHA-protocol. Esta CI no hace push:
+          # no necesita credenciales persistidas.
+          persist-credentials: false
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
