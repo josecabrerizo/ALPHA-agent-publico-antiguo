@@ -36,7 +36,9 @@ A.L.P.H.A. piensa (con herramientas y skills) y responde con voz. Falta la visi�
 El menú de voces del avatar solo enumera voces locales en Windows (SAPI). En
 Linux la voz local es la de espeak-ng y no aparece en esa lista todavía.
 
-Ejecuta todo con `npm run spike:conversar` (motor) y `npm run avatar` (cara).
+Ejecuta el motor con `npm run spike:conversar`; la cara vive en
+[ALPHA-avatar](https://github.com/DigitalTPM/ALPHA-avatar) (`npm run avatar`
+desde su checkout — se hablan por el puente aunque estén en carpetas distintas).
 
 ## Requisitos
 
@@ -223,13 +225,20 @@ Dos detalles que no son obvios:
 
 ## Arquitectura
 
-Monorepo con el cerebro separado de la cara por un contrato explícito:
+El proyecto vive en **tres repos**, con el cerebro separado de la cara por un
+contrato explícito:
+
+- **ALPHA-agent** (este repo) — el motor headless. Sin UI.
+- **[ALPHA-avatar](https://github.com/DigitalTPM/ALPHA-avatar)** — la cara: la
+  app Qt (NodeGui) y la fachada MCP `avatar-mcp` para agentes externos.
+- **[ALPHA-protocol](https://github.com/DigitalTPM/ALPHA-protocol)** — el
+  contrato del puente motor↔avatar: mensajes, puerto, token, framing y las dos
+  puntas del socket. Los otros dos lo consumen como git dependency
+  (`github:DigitalTPM/ALPHA-protocol#v2.0.0`, dist commiteado: instalar y ya).
 
 ```
 packages/
-  protocol/    Contrato del puente motor↔avatar: mensajes, puerto, token,
-               framing y las dos puntas del socket. Lo importan los demás.
-  engine/      Motor headless. Sin UI. Todo el cerebro y la E/S.
+  engine/      Motor headless. Todo el cerebro y la E/S.
     audio/     captura (ffmpeg) + VAD
     stt/       transcripción (whisper.cpp)
     spikes/    guiones ejecutables para validar cada capa por separado
@@ -237,28 +246,20 @@ packages/
     conversation/  bucle escuchar→pensar→hablar
     tts/       voz (Edge online / SAPI local)
     config/    esquema unificado + carga por capas + perfiles de avatar
-  ui-avatar/   App NodeGui: retrato flotante, menú de configuración y chat escrito
-  avatar-mcp/  Fachada MCP: cualquier agente externo puede usar la cara del avatar
 ```
 
-`@alpha/protocol` se compila a `dist/` (lo hace `npm install` solo, y también
-`npm run typecheck`); si lo tocas y vas a lanzar un spike directamente, refresca
-con `npm run build -w @alpha/protocol`.
-
-La ventana (Qt) no se puede probar sin levantar Qt, así que lo que sí tiene
-prueba en `ui-avatar` es lo que vive fuera de ella: la validación de los ajustes
-guardados, las tablas de agentes y estados, y el troceado de líneas del puente.
-Por eso `mergeSettings` y `takeLines` son funciones aparte y no código dentro
-del manejador del socket.
+La CI necesita el secreto `PROTOCOL_READ_TOKEN` (PAT fine-grained con
+contents:read sobre ALPHA-protocol) para instalar la git dependency privada.
 
 El motor no sabe que existe una UI: expone un **puente TCP local** (127.0.0.1,
 con token de sesión que se deja en `~/.alpha/`) y la app del avatar es un
-cliente delgado. Esto no es ceremonia — es lo que permite cambiar NodeGui por
-otra capa de presentación sin reescribir el cerebro. El avatar es el panel de
-control: lo que se configura en su menú (agente, modelo, sonido, privacidad)
-viaja al motor por ese puente. El protocolo entero —tipos de mensaje, puerto,
-ruta del token, framing— tiene una sola definición en `packages/protocol`;
-antes cada lado llevaba su copia a mano y podían divergir.
+cliente delgado que puede arrancarse desde OTRO checkout, sin raíz común.
+Esto no es ceremonia — es lo que permite cambiar NodeGui por otra capa de
+presentación sin reescribir el cerebro. El avatar es el panel de control: lo
+que se configura en su menú (agente, modelo, sonido, privacidad) viaja al
+motor por ese puente. El protocolo entero —tipos de mensaje, puerto, ruta del
+token, framing— tiene una sola definición en ALPHA-protocol; antes cada lado
+llevaba su copia a mano y podían divergir.
 
 El puente va en los dos sentidos, y **manda el motor**: él es el dueño de los
 perfiles de avatar y de la lista de micrófonos, y los envía al conectar. Si
@@ -266,19 +267,11 @@ rechaza un cambio —un avatar de nube con el modo confidencial puesto— respon
 con el que de verdad quedó activo, y la UI se alinea con él en vez de mentir
 sobre lo que está corriendo.
 
-Y como al avatar le da igual quién haya detrás del puente, `avatar-mcp` explota
-esa costura: es un servidor MCP por stdio que se hace pasar por el motor y da
-la cara (y la voz local) a cualquier agente externo. Con el motor apagado:
-
-```
-npm run avatar                      # la cara, reintentando conexión
-claude mcp add alpha-avatar -- npx -y tsx <ruta-al-repo>/packages/avatar-mcp/src/index.ts
-```
-
-y Claude Code puede `decir`, `saludar`, cambiar de `estado` o de avatar, y
-`leer_mensajes` del chat. Motor y fachada en el mismo puerto se excluyen a
-propósito (sobre la cara solo manda una voz); para tener ambos,
-`ALPHA_BRIDGE_PORT=43118` en fachada y avatar.
+Y como al avatar le da igual quién haya detrás del puente, la fachada
+`avatar-mcp` (en ALPHA-avatar) explota esa costura: un servidor MCP por stdio
+que se hace pasar por el motor y da la cara a cualquier agente externo. Motor
+y fachada en el mismo puerto se excluyen a propósito (sobre la cara solo manda
+una voz); para tener ambos, `ALPHA_BRIDGE_PORT=43118` en fachada y avatar.
 
 ### Por qué procesos externos y (casi) ningún módulo nativo
 

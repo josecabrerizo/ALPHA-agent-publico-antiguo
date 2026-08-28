@@ -11,13 +11,6 @@ models/
 *.wav
 *.png
 
-# ...pero los retratos de los avatares son parte del producto: sin ellos, un
-# clon nuevo se queda sin caras. La segunda linea es para las POSES, que viven
-# en una subcarpeta por avatar (unit-a/reposo.png): sin ella se colaban por el
-# *.png de arriba y un clon nuevo tenia el personaje quieto.
-!assets/avatars/*.png
-!assets/avatars/*/*.png
-
 # Secretos: claves de proveedores de nube
 .env
 .env.*

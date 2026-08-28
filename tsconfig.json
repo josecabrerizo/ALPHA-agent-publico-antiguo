@@ -1,9 +1,8 @@
 {
   "files": [],
   "references": [
-    { "path": "./packages/protocol" },
-    { "path": "./packages/engine" },
-    { "path": "./packages/ui-avatar" },
-    { "path": "./packages/avatar-mcp" }
+    {
+      "path": "./packages/engine"
+    }
   ]
 }

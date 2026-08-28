@@ -6,9 +6,6 @@ package-lock.json
 vendor/
 models/
 
-# Binarios
-assets/
-
 # Configuracion en vivo, la escribe el menu del avatar
 config/alpha.settings.json
 

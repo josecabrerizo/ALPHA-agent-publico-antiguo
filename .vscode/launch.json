@@ -2,24 +2,6 @@
   "version": "0.2.0",
   "configurations": [
     {
-      // Avatar bajo el depurador: qode es un Node con Qt, asi que el depurador
-      // de Node se engancha y funcionan breakpoints (via sourcemaps a los .ts)
-      // y la Consola de depuracion. El PATH mete las DLL de Qt (ver run.mjs).
-      "name": "A.L.P.H.A. Avatar (qode)",
-      "type": "node",
-      "request": "launch",
-      "runtimeExecutable": "${workspaceFolder}/node_modules/@nodegui/qode/binaries/qode.exe",
-      "program": "${workspaceFolder}/packages/ui-avatar/dist/index.js",
-      "cwd": "${workspaceFolder}",
-      "console": "integratedTerminal",
-      "sourceMaps": true,
-      "outFiles": ["${workspaceFolder}/packages/ui-avatar/dist/**/*.js"],
-      "preLaunchTask": "build-avatar",
-      "env": {
-        "PATH": "${workspaceFolder}/node_modules/@nodegui/nodegui/miniqt/6.10.2/msvc2022_64/bin${pathSeparator}${env:PATH}"
-      }
-    },
-    {
       // Cualquier spike del motor (audio, cerebro, voz...) bajo el depurador.
       // Cambia "program" al spike que quieras depurar.
       "name": "Motor: spike actual (tsx)",

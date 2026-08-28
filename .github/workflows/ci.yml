@@ -38,6 +38,18 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
+      # @alpha/protocol es una git dependency de un repo PRIVADO: npm clona
+      # por https y el runner no tiene credenciales. El PAT (fine-grained,
+      # contents:read sobre ALPHA-protocol) entra por insteadOf cubriendo las
+      # tres formas de URL que npm puede pedir.
+      - name: Acceso a ALPHA-protocol (git dependency privada)
+        shell: bash
+        run: |
+          BASE="https://x-access-token:${{ secrets.PROTOCOL_READ_TOKEN }}@github.com/DigitalTPM/ALPHA-protocol"
+          git config --global url."$BASE".insteadOf "https://github.com/DigitalTPM/ALPHA-protocol"
+          git config --global --add url."$BASE".insteadOf "ssh://git@github.com/DigitalTPM/ALPHA-protocol"
+          git config --global --add url."$BASE".insteadOf "git@github.com:DigitalTPM/ALPHA-protocol"
+
       - name: Instalar dependencias
         run: npm ci
 

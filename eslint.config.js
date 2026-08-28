@@ -41,12 +41,7 @@ export default tseslint.config(
     files: ['packages/*/src/**/*.ts'],
     languageOptions: {
       parserOptions: {
-        project: [
-          './packages/protocol/tsconfig.check.json',
-          './packages/engine/tsconfig.check.json',
-          './packages/ui-avatar/tsconfig.check.json',
-          './packages/avatar-mcp/tsconfig.check.json',
-        ],
+        project: ['./packages/engine/tsconfig.check.json'],
         tsconfigRootDir: import.meta.dirname,
       },
     },
@@ -93,18 +88,6 @@ export default tseslint.config(
       // Los `catch {}` vacios de este codigo son deliberados y llevan comentario
       // explicando por que; la regla no sabe leerlos.
       'no-empty': ['error', { allowEmptyCatch: true }],
-    },
-  },
-
-  {
-    files: ['packages/ui-avatar/src/**/*.ts'],
-    rules: {
-      // Los enums de NodeGui (MouseButton y compania) no los reconoce la regla
-      // como "el mismo enum" que el que devuelven sus propios metodos, asi que
-      // marca comparaciones correctas. Y castearlos para callarla dispara a su
-      // vez no-unnecessary-type-assertion, porque para TypeScript el tipo YA es
-      // el bueno. Es un artefacto del tipado de la libreria, no de este codigo.
-      '@typescript-eslint/no-unsafe-enum-comparison': 'off',
     },
   },
 

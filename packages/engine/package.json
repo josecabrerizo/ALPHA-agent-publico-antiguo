@@ -21,7 +21,7 @@
     "spike:agente": "tsx src/spikes/agente.ts"
   },
   "dependencies": {
-    "@alpha/protocol": "0.0.1",
+    "@alpha/protocol": "github:DigitalTPM/ALPHA-protocol#v2.0.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "audify": "^1.10.1",
     "msedge-tts": "^2.0.7",
